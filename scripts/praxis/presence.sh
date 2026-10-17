@@ -72,7 +72,7 @@ if (( has_graphis )); then
     fi
 fi
 fwin=
-(( has_files )) && fwin=$(qs -c tacit ipc call files windows 2>/dev/null)
+(( has_files )) && fwin=$(qs -p "${TACIT_SHELL:-$HOME/.config/quickshell/tacit}" ipc call files windows 2>/dev/null)
 
 # pi's session into REPLY. pi appends to its file and closes it, and writes nothing before its
 # first reply, and process.title blanks its cmdline (--session and --session-dir are unreadable).

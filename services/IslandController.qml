@@ -1464,7 +1464,8 @@ Singleton {
     function showNotAnswering(n) {
         if (!root.enabled || root.suppressed)
             return false;
-        const name = DesktopEntries.heuristicLookup(n.cls)?.name ?? n.cls;
+        // without a launcher entry, the class's last part: "Org.kde.krita isn't answering" for Krita (2026-10-17)
+        const name = DesktopEntries.heuristicLookup(n.cls)?.name ?? n.cls.split(".").pop();
         n.name = name.charAt(0).toUpperCase() + name.slice(1);
         n.since = Date.now();
         root.notAnswering = n;

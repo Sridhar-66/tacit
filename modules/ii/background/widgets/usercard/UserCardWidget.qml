@@ -122,7 +122,7 @@ AbstractBackgroundWidget {
                 glyph: "lock"
                 label: GlobalStates.screenLocked ? Translation.tr("Locked") : Translation.tr("Lock")
                 // Same command as Super+L (keybinds.lua); LockScreen.lock() honours lock.useHyprlock
-                onClicked: Quickshell.execDetached(["bash", "-c", "qs -c tacit ipc call lock activate || pidof hyprlock || hyprlock"])
+                onClicked: Quickshell.execDetached(["bash", "-c", 'qs -p "$1" ipc call lock activate || pidof hyprlock || hyprlock', "bash", Quickshell.shellPath("")])
             }
             ActionRow {
                 glyph: "settings"

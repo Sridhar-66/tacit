@@ -36,7 +36,7 @@ BEGIN = "-- >>> Tacit Settings: default apps (written by Settings)"
 END = "-- <<< Tacit Settings: default apps"
 # Tacit's own Files is driven over the shell's IPC; its .desktop Exec is a quoted sh -c wrapper
 # that is awkward to pass through a Lua string.
-OWN_FILES = {"quiet-files.desktop": "qs -c tacit ipc call files open"}
+OWN_FILES = {"quiet-files.desktop": 'qs -p "${TACIT_SHELL:-$HOME/.config/quickshell/tacit}" ipc call files open'}
 
 
 def app_dirs():
