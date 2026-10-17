@@ -225,7 +225,7 @@ def perms_for(app, categories):
         cat = json.load(open(PERMS))
     except (OSError, ValueError):
         cat = {}
-    p = dict(network=True, files="user-folders", devices=["gpu", "audio"], x11=False, talk=[])
+    p = dict(network=True, files="user-folders", devices=["gpu", "audio"], x11=True, talk=[])
     p.update(cat.get("default", {}))
     p.update(cat.get("apps", {}).get(app, {}))
     return p
@@ -264,7 +264,7 @@ def refresh_caches(root):
     """the caches pacman's hooks would rebuild, rebuilt for the system and the bundle together, into the bundle"""
     usr = os.path.join(root, "usr"); os.makedirs(usr, exist_ok=True)
     work = os.path.join(os.path.dirname(root), ".work-" + os.path.basename(os.path.dirname(root)))
-    shutil.rmtree(work, ignore_errors=True); os.makedirs(work)
+    wipe(work); os.makedirs(work)
     cmds = []
     if glob.glob(os.path.join(usr, "share/glib-2.0/schemas/*.xml")):
         cmds.append("glib-compile-schemas /usr/share/glib-2.0/schemas")
@@ -276,10 +276,24 @@ def refresh_caches(root):
         cmds.append("update-mime-database /usr/share/mime")
     for theme in glob.glob(os.path.join(usr, "share/icons/*/index.theme")):
         cmds.append(f"gtk-update-icon-cache -q -t -f /usr/share/icons/{os.path.basename(os.path.dirname(theme))}")
+    # the bundle's own packages' hooks: VLC ships an empty plugin list that its hook fills, and without it VLC found
+    # none of its windows and fell back to a command line (2026-10-17)
+    for hook in sorted(glob.glob(os.path.join(usr, "share/libalpm/hooks/*.hook"))):
+        text = open(hook, errors="replace").read()
+        m = re.search(r"^Exec\s*=\s*(.+)$", text, re.M)
+        if m and "NeedsTargets" not in text and re.search(r"^When\s*=\s*PostTransaction", text, re.M):
+            cmds.append(m.group(1).strip())
     if cmds:
         subprocess.run(["bwrap", *layers(root, writable_usr=work), "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
                         "--unshare-all", "--die-with-parent", "sh", "-c", " ; ".join(c + " >/dev/null 2>&1" for c in cmds)])
-    shutil.rmtree(work, ignore_errors=True)
+    wipe(work)
+
+
+def wipe(path):
+    """delete a folder, including the overlay's work folder, which the kernel leaves with no permissions"""
+    if os.path.lexists(path):
+        subprocess.run(["chmod", "-R", "u+rwX", path], capture_output=True)
+        shutil.rmtree(path)
 
 
 def host_stamp():
@@ -298,7 +312,7 @@ def run(app, cmd):
             pass                                    # offline: start what we have
     root = os.path.join(base, "root")
     perm = man["permissions"]
-    uid = os.getuid(); rt = f"/run/user/{uid}"
+    uid = os.getuid(); rt = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
     data = os.path.join(DATA, app); os.makedirs(data, exist_ok=True)
     a = ["bwrap", "--die-with-parent", "--new-session", "--unshare-all", "--clearenv", *layers(root),
          "--ro-bind", "/sys", "/sys", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/var/tmp",
@@ -331,6 +345,8 @@ def run(app, cmd):
         if k in os.environ:
             env[k] = os.environ[k]
     env.update({k: v for k, v in os.environ.items() if k.startswith("LC_")})
+    # X11 is on unless an app is known to be Wayland only: VLC's window and Java's need it (2026-10-17), and apps that
+    # can use Wayland still do, as Tacit's session asks Qt and GTK for it first. What it opens up is other X11 windows.
     if perm.get("x11") and os.environ.get("DISPLAY"):
         n = os.environ["DISPLAY"].lstrip(":").split(".")[0]
         a += ["--ro-bind-try", f"/tmp/.X11-unix/X{n}", f"/tmp/.X11-unix/X{n}"]
@@ -343,12 +359,17 @@ def run(app, cmd):
         pdir = os.path.join(rt, "tacit-bundle"); os.makedirs(pdir, exist_ok=True)
         bus = os.path.join(pdir, f"{app}-{os.getpid()}")
         r, w = os.pipe()
-        names = [f"--own={n}" for i in man.get("ids", []) for n in (i, i + ".*")] + ["--own=org.mpris.MediaPlayer2.*"]
+        # only well-formed bus names (two or more dotted parts): a launcher file named vlc.desktop gave "vlc", which the
+        # proxy refused, and the app never started (2026-10-17)
+        valid = [i for i in man.get("ids", []) if re.fullmatch(r"[A-Za-z_][\w-]*(\.[A-Za-z_][\w-]*)+", i)]
+        names = [f"--own={n}" for i in valid for n in (i, i + ".*")] + ["--own=org.mpris.MediaPlayer2.*"]
         talk = [f"--talk={t}" for t in ["org.freedesktop.portal.*", "org.freedesktop.Notifications", "org.a11y.Bus",
                                         "org.freedesktop.FileManager1", *perm.get("talk", [])]]
         subprocess.Popen(["xdg-dbus-proxy", f"--fd={w}", bus_in, bus, "--filter", *names, *talk], pass_fds=(w,),
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        os.close(w); os.read(r, 1)
+        os.close(w)
+        if not os.read(r, 1):
+            sys.exit(f"tacit-bundle: the bus filter for {app} did not start")
         os.set_inheritable(r, True)
         a += ["--bind", bus, f"{rt}/bus", "--sync-fd", str(r)]
         env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={rt}/bus"
@@ -379,14 +400,13 @@ def integrate(app, root, target_files):
         name = os.path.basename(src); dst = os.path.join(APPS_DIR, name)
         if os.path.exists(dst) and "X-Tacit-Bundle=" not in open(dst, errors="replace").read():
             continue                                       # the user's own file: leave it
-        out, icon = [], None
+        out, icon, exec_ = [], None, None
         for line in open(src, encoding="utf-8", errors="replace").read().splitlines():
             if line.startswith(("TryExec=", "DBusActivatable=")):
                 continue
             if line.startswith("Exec="):
                 orig = line[5:]
-                if not execs:
-                    execs.append([t for t in shlex.split(orig) if not t.startswith("%")])
+                exec_ = exec_ or [t for t in shlex.split(orig) if not re.search(r"%[fFuUdDnNickvm]", t)]
                 line = f"Exec={shlex.quote(SELF)} run {app} -- {orig}"
             if line.startswith("Icon="):
                 icon = line[5:]
@@ -395,6 +415,10 @@ def integrate(app, root, target_files):
                 out.append(f"X-Tacit-Bundle={app}")
         open(dst, "w").write("\n".join(out) + "\n"); made.append(dst)
         ids.append(name[:-8])
+        if exec_:
+            # the app's own start, not one of its extra entries (VLC's "Open Blu-ray" came first and VLC started on
+            # "bluray://")
+            execs.append((("NoDisplay=true" in out), name[:-8] != app, exec_))
         if icon and not icon.startswith("/"):
             for f in glob.glob(os.path.join(root, "usr/share/icons/hicolor/*/apps", icon + ".*")) + \
                      glob.glob(os.path.join(root, "usr/share/pixmaps", icon + ".*")):
@@ -402,7 +426,7 @@ def integrate(app, root, target_files):
                 d = os.path.join(ICONS_DIR, rel); os.makedirs(os.path.dirname(d), exist_ok=True)
                 shutil.copy2(f, d); made.append(d)
     subprocess.run(["update-desktop-database", APPS_DIR], capture_output=True)
-    return made, ids, execs
+    return made, ids, [e for *_, e in sorted(execs, key=lambda e: e[:2])]
 
 
 def install(target, quiet=False):
@@ -434,7 +458,7 @@ def install(target, quiet=False):
     if sys_parts:
         raise Refused("system", "needs parts of the system: " + ", ".join(sys_parts))
     # unpack into a fresh folder, then swap it in
-    stage = base + ".new"; shutil.rmtree(stage, ignore_errors=True)
+    stage = base + ".new"; wipe(stage)
     root = os.path.join(stage, "root"); os.makedirs(root)
     skipped = []
     for n, f in files.items():
@@ -469,9 +493,9 @@ def remove(app, keep_data=True, quiet=False):
             os.unlink(f)
         except OSError:
             pass
-    shutil.rmtree(base)
+    wipe(base)
     if not keep_data:
-        shutil.rmtree(os.path.join(DATA, app), ignore_errors=True)
+        wipe(os.path.join(DATA, app))
     subprocess.run(["update-desktop-database", APPS_DIR], capture_output=True)
     if not quiet:
         say(step="removed", app=app)

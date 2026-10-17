@@ -293,6 +293,12 @@ def install(disk, place, keep):
     with open(f"{TARGET}/etc/pacman.d/mirrorlist", "w") as f:
         f.write("Server = http://mirror.archlinuxarm.org/$arch/$repo\n" if os.uname().machine == "aarch64" else
                 "Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch\nServer = https://fastly.mirror.pkgbuild.com/$repo/os/$arch\n")
+    # today's package lists, when online: without them Apps had nothing to offer until the first background update,
+    # 20 minutes after the first start (the VM install test, 2026-10-17); offline, that update brings them
+    try:
+        subprocess.run(["arch-chroot", TARGET, "pacman", "-Sy", "--noconfirm"], capture_output=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        pass
     # the Wi-Fi network joined in Setup, so the new system is online at once
     live_nm = "/etc/NetworkManager/system-connections"
     if os.path.isdir(live_nm):

@@ -313,5 +313,87 @@
       "line": "The open-source build of Visual Studio Code."
     }
   },
-  "_crop": "crop = [x, y, width, height] as fractions of the app's first screenshot: the part a featured picture shows"
+  "_crop": "crop = [x, y, width, height] as fractions of the app's first screenshot: the part a featured picture shows",
+  "issue": [
+    {
+      "layout": "cover",
+      "pkg": "krita",
+      "kicker": "Draw · for painting",
+      "line": "Draw and paint, from sketch to finished work.",
+      "quote": "Krita is the full-featured digital art studio.",
+      "from": "the Krita Foundation",
+      "shot": "279b78a1",
+      "crop": [
+        0.041,
+        0.15,
+        0.808,
+        0.742
+      ]
+    },
+    {
+      "layout": "split",
+      "pkg": "darktable",
+      "kicker": "Edit photos · like Lightroom",
+      "line": "Develop and sort the photos from your camera.",
+      "quote": "darktable supports most modern cameras' raw formats, and does all of its processing at very high precision.",
+      "from": "the darktable developers",
+      "shot": "6607edd4",
+      "crop": [
+        0.1775,
+        0.1,
+        0.6444,
+        0.6867
+      ]
+    },
+    {
+      "layout": "words",
+      "kicker": "Talk to people",
+      "say": [
+        [
+          "For private messages and calls, ",
+          "signal-desktop"
+        ],
+        [
+          ". For big groups and channels, ",
+          "telegram-desktop"
+        ],
+        [
+          ". For email, ",
+          "thunderbird"
+        ],
+        [
+          ".",
+          ""
+        ]
+      ]
+    },
+    {
+      "layout": "object",
+      "pkg": "blender",
+      "kicker": "Make in 3D",
+      "line": "Model, sculpt and animate in 3D.",
+      "quote": "Blender is a public project, made by hundreds of people from around the world.",
+      "from": "",
+      "shot": "26f771e9",
+      "crop": [
+        0.035,
+        0.085,
+        0.585,
+        0.8
+      ]
+    },
+    {
+      "layout": "cinema",
+      "pkg": "vlc",
+      "kicker": "Watch films · plays everything",
+      "line": "Films and music in nearly any format.",
+      "shot": "922dfd57",
+      "crop": [
+        0.008,
+        0.095,
+        0.984,
+        0.775
+      ]
+    }
+  ]
 }

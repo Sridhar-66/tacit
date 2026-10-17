@@ -16,7 +16,7 @@ password prompt is the desktop's own (the shell's polkit agent).
 Never `pacman -Sy`: refreshing the package lists without updating the system is what leaves an Arch system half
 updated. An install that would upgrade anything already installed is refused ("needs a system update first").
 """
-import gzip, hashlib, json, os, re, shutil, subprocess, sys, urllib.request
+import glob, gzip, hashlib, json, os, re, shutil, subprocess, sys, urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,7 +25,7 @@ EDITORIAL = os.path.join(SHELL, "assets", "store", "editorial.json")
 CATALOGUE = "/usr/share/swcatalog"
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "tacit-store")
 LANG = "{http://www.w3.org/XML/1998/namespace}lang"
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 
 
 def out(obj):
@@ -79,6 +79,8 @@ def component(c, origin):
         r0 = rel[0]
         rd = next((d for d in r0.findall("description") if d.get(LANG) is None), None)
         release = {"version": r0.get("version") or "", "notes": paragraphs(rd)}
+    cats = c.find("categories")
+    categories = [(x.text or "").strip() for x in (cats if cats is not None else []) if (x.text or "").strip()]
     keywords = []
     for k in c.findall("keywords"):
         if k.get(LANG) in (None, "en"):
@@ -90,7 +92,7 @@ def component(c, origin):
         "homepage": next(((u.text or "").strip() for u in c.findall("url") if u.get("type") == "homepage"), ""),
         "desktop": next(((l.text or "").strip() for l in c.findall("launchable") if l.get("type") == "desktop-id"), ""),
         "icon": f"{CATALOGUE}/icons/{origin}/128x128/{icon}" if icon else "",
-        "shots": shots, "release": release, "description": paragraphs(desc), "keywords": keywords,
+        "shots": shots, "release": release, "description": paragraphs(desc), "keywords": keywords, "categories": categories,
     }
 
 
@@ -133,7 +135,59 @@ def available():
 
 
 def installed():
-    return set(run(["pacman", "-Qq"]).split())
+    return set(run(["pacman", "-Qq"]).split()) | bundles()
+
+
+# ---- Tacit's sandbox (bundle.py) ----------------------------------------------------------------------------------
+# Apps come as bundles: in their own folder, run walled off from the system and the user's other files, got and removed
+# with no password. Only an app that needs parts of the system itself (a service, device rules) goes through pacman.
+
+BUNDLE = [sys.executable, "-I", os.path.join(os.path.dirname(os.path.abspath(__file__)), "bundle.py")]
+BUNDLES = os.path.join(os.path.expanduser("~"), ".local/share/tacit/bundles")
+
+
+def bundles():
+    return {os.path.basename(os.path.dirname(m)) for m in glob.glob(os.path.join(BUNDLES, "*/manifest.json"))}
+
+
+def bundle_plan(pkg):
+    """the sandbox's plan in the window's words, or None when the app cannot be a bundle"""
+    try:
+        j = json.loads(run(BUNDLE + ["plan", pkg], timeout=180).strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+    if j.get("step") == "refused":
+        return {"can": False, "why": j["why"], "count": 0} if j["why"] in ("offline", "space") else None
+    need = round(j["size"] / 1e6)
+    os.makedirs(BUNDLES, exist_ok=True)
+    free = shutil.disk_usage(BUNDLES).free // 1_000_000
+    if need + 500 > free:
+        return {"can": False, "why": "space", "count": len(j["packages"]), "need": need, "freeMB": free}
+    return {"can": True, "count": len(j["packages"]), "download": round(j["download"] / 1e6), "need": need}
+
+
+def bundle_install(pkg):
+    """get `pkg` as a bundle, saying its progress; its outcome, or "system" when it has to go through pacman"""
+    proc = subprocess.Popen(BUNDLE + ["install", pkg], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace")
+    result = "failed"
+    for line in proc.stdout:
+        try:
+            j = json.loads(line)
+        except ValueError:
+            continue
+        st = j.get("step")
+        if st == "lists":
+            out({"progress": 0.03, "phase": "Getting the latest list"})
+        elif st == "fetch":
+            out({"progress": 0.05 + 0.75 * j["done"] / max(1, j["total"]), "phase": f"Downloading {j['done']} of {j['total']}"})
+        elif st in ("unpack", "caches"):
+            out({"progress": 0.85 if st == "unpack" else 0.95, "phase": "Installing"})
+        elif st == "done":
+            result = "ok"
+        elif st == "refused":
+            result = {"installed": "ok"}.get(j["why"], j["why"])
+    proc.wait()
+    return result
 
 
 def mib(text):
@@ -181,9 +235,10 @@ def icon_png(src):
     return dst if os.path.exists(dst) else ""
 
 
-def shot(url):
-    """a screenshot from the developer's own site, kept at most 1600 px wide as JPEG; "" when it cannot be had"""
-    name = hashlib.sha1(url.encode()).hexdigest()[:20]
+def shot(url, wide=1600):
+    """a screenshot from the developer's own site, kept at most `wide` px wide as JPEG; "" when it cannot be had.
+    Pictures shown across the whole window (the issue, an app's cover) are kept at up to 2560 px"""
+    name = hashlib.sha1(url.encode()).hexdigest()[:20] + ("" if wide == 1600 else f"-w{wide}")
     dst = os.path.join(CACHE, "shots", name + ".jpg")
     if os.path.exists(dst):
         return dst
@@ -193,7 +248,7 @@ def shot(url):
         req = urllib.request.Request(url, headers={"User-Agent": "Tacit Apps"})
         with urllib.request.urlopen(req, timeout=20) as r, open(raw, "wb") as f:
             f.write(r.read(40 * 1024 * 1024))
-        subprocess.run(["magick", raw + "[0]", "-resize", "1600x>", "-quality", "86", dst], capture_output=True, timeout=60)
+        subprocess.run(["magick", raw + "[0]", "-resize", f"{wide}x>", "-quality", "88", dst], capture_output=True, timeout=60)
     except Exception:
         pass
     finally:
@@ -220,6 +275,82 @@ def cropped(path, crop):
 
 
 def tone(path):
+    """the picture's tone, worked out once per picture and kept"""
+    if not path:
+        return ""
+    store = os.path.join(CACHE, "tones.json")
+    try:
+        known = json.load(open(store))
+    except (OSError, ValueError):
+        known = {}
+    if path in known:
+        return known[path]
+    known[path] = measure_tone(path)
+    try:
+        tmp = store + ".tmp"
+        json.dump(known, open(tmp, "w")); os.replace(tmp, store)
+    except OSError:
+        pass
+    return known[path]
+
+
+def brightness(path):
+    """how bright the top third of a picture is (0..1): the window's header thickens its glass over bright pictures"""
+    if not path:
+        return 0.5
+    store = os.path.join(CACHE, "tones.json")
+    try:
+        known = json.load(open(store))
+    except (OSError, ValueError):
+        known = {}
+    key = "bright:" + path
+    if key not in known:
+        v = run(["magick", path, "-gravity", "North", "-crop", "100%x33%+0+0", "+repage", "-colorspace", "Gray", "-format", "%[fx:mean]", "info:"])
+        try:
+            known[key] = round(float(v.strip()), 3)
+        except ValueError:
+            known[key] = 0.5
+        try:
+            tmp = store + ".tmp"
+            json.dump(known, open(tmp, "w")); os.replace(tmp, store)
+        except OSError:
+            pass
+    return known[key]
+
+
+def aspect(path):
+    size = run(["identify", "-format", "%w %h", path]).split() if path else []
+    return round(int(size[0]) / int(size[1]), 4) if len(size) == 2 and int(size[1]) else 1.6
+
+
+def cover(pkg, ed, cat):
+    """an app's picture of its work, when the store has chosen one: the issue's crop (only the work, never toolbars)"""
+    sp = next((x for x in ed.get("issue", []) if x.get("pkg") == pkg and x.get("crop")), None)
+    if not sp:
+        return ""
+    urls = [x["url"] for x in cat.get(pkg, {}).get("shots", [])]
+    url = next((u for u in urls if hashlib.sha1(u.encode()).hexdigest().startswith(sp.get("shot", "-"))), "")
+    return cropped(shot(url, 2560), sp["crop"]) if url else ""
+
+
+def issue(ed, cat):
+    """the front page as an issue: each spread with its picture cropped to the work, the picture's tone and brightness"""
+    spreads = []
+    for sp in ed.get("issue", []):
+        sp = dict(sp)
+        if sp.get("pkg"):
+            urls = [x["url"] for x in cat.get(sp["pkg"], {}).get("shots", [])]
+            url = next((u for u in urls if hashlib.sha1(u.encode()).hexdigest().startswith(sp.get("shot", "-"))), urls[0] if urls else "")
+            pic = cropped(shot(url, 2560), sp.get("crop")) if url else ""
+            sp["picture"], sp["tone"], sp["bright"] = pic, tone(pic), brightness(pic)
+            sp["aspect"] = aspect(pic)
+            w = run(["identify", "-format", "%w", pic]).strip() if pic else ""
+            sp["px"] = int(w) if w.isdigit() else 0     # its width in pixels: a small picture is not stretched past ~1.2x
+        spreads.append(sp)
+    return spreads
+
+
+def measure_tone(path):
     """a picture's own colour for the window to carry (a wash behind the page, the shade under words on it): of
     the picture's main colours, the one with the most colour in it that is neither near black nor near white"""
     if not path:
@@ -247,7 +378,15 @@ def editorial():
     return json.load(open(EDITORIAL))
 
 
-def info(pkg, cat, ed, avail, inst, f=None):
+def icon_ready(src):
+    """the converted icon if it is already there; never converts"""
+    if not src:
+        return ""
+    dst = os.path.join(CACHE, "icons", os.path.basename(src).rsplit(".", 1)[0] + ".png")
+    return dst if os.path.exists(dst) else ""
+
+
+def info(pkg, cat, ed, avail, inst, f=None, icon=True):
     c = cat.get(pkg, {})
     e = ed["apps"].get(pkg, {})
     names = [pkg] + e.get("also", [])
@@ -255,7 +394,7 @@ def info(pkg, cat, ed, avail, inst, f=None):
     f = f or {}
     return {
         "pkg": pkg, "name": e.get("name") or c.get("name") or pkg, "line": e.get("line") or c.get("summary", ""), "like": e.get("like", ""),
-        "developer": c.get("developer", ""), "icon": icon_png(c.get("icon", "")), "desktop": c.get("desktop", ""),
+        "developer": c.get("developer", ""), "icon": (icon_png if icon else icon_ready)(c.get("icon", "")), "desktop": c.get("desktop", ""),
         "available": pkg in avail or bool(have), "installed": bool(have), "installedAs": have,
         "version": f.get("version", ""), "download": f.get("download", 0), "size": f.get("size", 0),
         "free": free_license(c.get("license") or f.get("licenses", "")),
@@ -264,7 +403,8 @@ def info(pkg, cat, ed, avail, inst, f=None):
 
 def home():
     ed, cat, avail, inst = editorial(), load_index(), available(), installed()
-    pkgs = sorted({p for j in ed["jobs"] for p in j["pkgs"]} | set(ed["picks"]) | {ed["feature"]["pkg"]})
+    pkgs = sorted({p for j in ed["jobs"] for p in j["pkgs"]} | set(ed["picks"]) | {ed["feature"]["pkg"]}
+                  | {sp["pkg"] for sp in ed.get("issue", []) if sp.get("pkg")} | {pk for sp in ed.get("issue", []) for _, pk in sp.get("say", []) if pk})
     f = facts([p for p in pkgs if p in avail])
     apps = {p: info(p, cat, ed, avail, inst, f.get(p)) for p in pkgs}
     def first_shot(p):
@@ -279,63 +419,201 @@ def home():
         if path and os.path.exists(path):
             windows = json.load(open(path))
             break
-    out({"arch": os.uname().machine, "feature": feature, "picks": picks, "jobs": ed["jobs"], "apps": apps, "windows": windows,
-         "installed": sorted(p for p in apps if apps[p]["installed"])})
+    page = {"arch": os.uname().machine, "feature": feature, "picks": picks, "issue": issue(ed, cat), "jobs": ed["jobs"], "apps": apps, "windows": windows,
+         "installed": sorted(p for p in apps if apps[p]["installed"])}
+    # kept, so the window can draw the front page the moment it opens and refresh it from this a moment later
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        tmp = os.path.join(CACHE, "home.json.tmp")
+        json.dump(page, open(tmp, "w")); os.replace(tmp, os.path.join(CACHE, "home.json"))
+    except OSError:
+        pass
+    out(page)
+
+
+# words that carry no meaning in "what do you want to do?"
+QUIET = set("i im i'm want wanna to a an the my me some for with and of on in do can how something app apps program programs "
+            "software tool tools thing things like need get make let lets please".split())
+# what people say -> the catalogue's own categories (freedesktop main and additional categories)
+SAYS = {
+    "game": ["Game"], "games": ["Game"], "play": ["Game"], "gaming": ["Game"],
+    "music": ["Audio", "Music"], "listen": ["Audio", "Player"], "song": ["Audio"], "songs": ["Audio"], "podcast": ["Audio"],
+    "video": ["Video"], "videos": ["Video"], "watch": ["Video", "Player"], "film": ["Video"], "films": ["Video"], "movie": ["Video"], "movies": ["Video"],
+    "photo": ["Photography", "Graphics"], "photos": ["Photography", "Graphics"], "picture": ["Graphics"], "pictures": ["Graphics"],
+    "draw": ["RasterGraphics", "VectorGraphics"], "paint": ["RasterGraphics"], "3d": ["3DGraphics"],
+    "write": ["WordProcessor", "TextEditor"], "document": ["WordProcessor", "Office"], "documents": ["WordProcessor", "Office"],
+    "spreadsheet": ["Spreadsheet"], "slides": ["Presentation"], "office": ["Office"],
+    "code": ["Development", "IDE"], "coding": ["Development", "IDE"], "programming": ["Development", "IDE"],
+    "chat": ["Chat", "InstantMessaging"], "call": ["Telephony", "VideoConference", "InstantMessaging"], "message": ["InstantMessaging"],
+    "mail": ["Email"], "email": ["Email"], "browse": ["WebBrowser"], "web": ["WebBrowser"], "internet": ["WebBrowser"],
+    "record": ["Recorder", "AudioVideo"], "stream": ["AudioVideo"], "learn": ["Education"], "study": ["Education"],
+    "money": ["Finance"], "budget": ["Finance"], "science": ["Science"], "map": ["Maps"], "maps": ["Maps"],
+}
+
+
+def plain(t):
+    return re.sub(r"[^a-z0-9 ]", "", t.lower())
+
+
+def scores(q, cat, ed, avail, inst):
+    words = [w for w in plain(q).split() if w not in QUIET] or plain(q).split()
+    whole = " ".join(words)
+    scored = []
+    for pkg, c in cat.items():
+        if pkg not in avail and pkg not in inst:
+            continue
+        name, summ, keys, cats = plain(c["name"]), plain(c["summary"]), [plain(k) for k in c["keywords"]], set(c.get("categories", []))
+        s = 0
+        if whole and (name == whole or pkg == whole):
+            s += 12
+        for w in words:
+            stem = w[:-1] if len(w) > 3 and w.endswith("s") else w
+            if name == w or name.startswith(w):
+                s += 6
+            elif stem in name:
+                s += 4
+            if any(k == w or k == stem or stem in k for k in keys):
+                s += 3
+            if stem in summ:
+                s += 2
+            if cats & set(SAYS.get(w, [])):
+                s += 3
+        if s and pkg in ed["apps"]:
+            s += 2
+        if s:
+            scored.append((-s, name, pkg))
+    scored.sort()
+    return [p for _, _, p in scored[:24]]
 
 
 def search(words):
     q = " ".join(words).lower().strip()
     if not q:
-        return out({"query": q, "apps": []})
+        return out({"query": q, "apps": [], "done": True})
     ed, cat, avail, inst = editorial(), load_index(), available(), installed()
-    scored = []
-    for pkg, c in cat.items():
-        if pkg not in avail and pkg not in inst:
+    out({"query": q, "apps": [info(p, cat, ed, avail, inst) for p in scores(q, cat, ed, avail, inst)], "done": True})
+
+
+def serve():
+    """one backend for the whole time the window is open: a search is answered from memory, the package lists are read
+    again only when pacman's databases change, and icons that are not converted yet arrive in a second answer"""
+    import threading, queue
+    state = {"ed": None, "ed_m": 0, "cat": None, "stamp": None, "avail": set(), "inst": set()}
+    def stamp():
+        paths = ["/var/lib/pacman/local", BUNDLES] + [os.path.join("/var/lib/pacman/sync", f) for f in os.listdir("/var/lib/pacman/sync") if f.endswith(".db")]
+        return [os.path.getmtime(p) for p in paths if os.path.exists(p)]
+    def fresh():
+        m = os.path.getmtime(EDITORIAL)
+        if state["ed"] is None or m != state["ed_m"]:
+            state["ed"], state["ed_m"] = editorial(), m
+        if state["cat"] is None:
+            state["cat"] = load_index()
+        st = stamp()
+        if st != state["stamp"]:
+            state["stamp"], state["avail"], state["inst"] = st, available(), installed()
+    lock, latest, icons = threading.Lock(), {"q": None, "pkgs": []}, queue.Queue()
+    def answer(q, pkgs):
+        cat, ed = state["cat"], state["ed"]
+        apps = []
+        for p in pkgs:
+            a = info(p, cat, ed, state["avail"], state["inst"], icon=False)
+            if not a["icon"] and cat.get(p, {}).get("icon"):
+                icons.put(p)
+            apps.append(a)
+        with lock:
+            out({"query": q, "apps": apps, "done": True})
+    def convert():
+        while True:
+            p = icons.get()
+            icon_png(state["cat"].get(p, {}).get("icon", ""))
+            with lock:
+                q, pkgs = latest["q"], latest["pkgs"]
+            if p in pkgs and icons.empty():
+                answer(q, pkgs)
+    threading.Thread(target=convert, daemon=True).start()
+    for line in sys.stdin:
+        try:
+            req = json.loads(line)
+        except ValueError:
             continue
-        name, summ = c["name"].lower(), c["summary"].lower()
-        s = 0
-        if name == q or pkg == q:
-            s += 10
-        elif name.startswith(q):
-            s += 6
-        elif q in name:
-            s += 4
-        if any(q == k or q in k for k in c["keywords"]):
-            s += 3
-        if q in summ:
-            s += 2
-        if pkg in ed["apps"]:
-            s += 1 if s else 0
-        if s:
-            scored.append((-s, name, pkg))
-    scored.sort()
-    out({"query": q, "apps": [info(p, cat, ed, avail, inst) for _, _, p in scored[:24]]})
+        if req.get("op") != "search":
+            continue
+        q = str(req.get("q", "")).lower().strip()
+        if not q:
+            out({"query": q, "apps": [], "done": True}); continue
+        fresh()
+        pkgs = scores(q, state["cat"], state["ed"], state["avail"], state["inst"])
+        with lock:
+            latest["q"], latest["pkgs"] = q, pkgs
+        answer(q, pkgs)
 
 
 def targets(pkg):
-    """what installing `pkg` would download: [(name, MB)]"""
+    """what installing `pkg` would download: [(name, MB, url)]"""
     res = []
-    for line in run(["pacman", "-Sp", "--print-format", "%n %s", pkg], timeout=120).splitlines():
+    for line in run(["pacman", "-Sp", "--print-format", "%n %s %l", pkg], timeout=120).splitlines():
         parts = line.split()
-        if len(parts) == 2 and parts[1].isdigit():
-            res.append((parts[0], round(int(parts[1]) / 1e6)))
+        if len(parts) == 3 and parts[1].isdigit():
+            res.append((parts[0], round(int(parts[1]) / 1e6), parts[2]))
     return res
 
 
-def plan(pkg, inst):
+def gone(urls):
+    """the files the server no longer has. This computer's list of packages is only refreshed by a system update; once
+    the server has moved on, the versions it names are deleted there (403/404) and installing them cannot work"""
+    def status(u):
+        try:
+            req = urllib.request.Request(u, method="HEAD", headers={"User-Agent": "Tacit Apps"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+        except Exception:
+            return 0        # no answer: not proof that it is gone (offline is said when installing)
+    with ThreadPoolExecutor(8) as pool:
+        return [u for u, code in zip(urls, pool.map(status, urls)) if code in (403, 404, 410)]
+
+
+def pending(pkg=""):
+    """what getting `pkg` together with the waiting updates would bring: the updates' count and size and the app's own, from
+    the fresh copy of the package list that checkupdates keeps in /tmp (no password; this computer's own list is untouched)"""
+    run(["checkupdates"], timeout=180)
+    db = os.environ.get("CHECKUPDATES_DB") or os.path.join(os.environ.get("TMPDIR") or "/tmp", f"checkup-db-{os.getuid()}")
+    def sizes(args):
+        out_ = []
+        for line in run(["pacman", *args, "--dbpath", db, "--print-format", "%n %s %l"], timeout=120).splitlines():
+            parts = line.split()
+            if len(parts) == 3 and parts[1].isdigit():
+                out_.append((parts[0], int(parts[1]), parts[2].startswith("file://")))   # file:// = already downloaded
+        return out_
+    ups = sizes(["-Sup"])
+    app = [x for x in sizes(["-Sp", pkg]) if x[0] not in {n for n, _, _ in ups}] if pkg else []
+    mb = lambda xs: round(sum(sz for _, sz, _ in xs) / 1e6)
+    return {"updates": len(ups), "updatesMB": mb(ups), "appMB": mb(app),
+            "toDownloadMB": mb([x for x in ups + app if not x[2]])}
+
+
+def plan(pkg, inst, ask=True):
     """whether `pkg` can be got now, and if not why, in the window's words"""
+    return bundle_plan(pkg) or system_plan(pkg, inst, ask)
+
+
+def system_plan(pkg, inst, ask=True):
+    """the same for an install through pacman"""
     t = targets(pkg)
     if not t:
         return {"can": False, "why": "unavailable", "count": 0}
-    upgrades = [n for n, _ in t if n in inst and n != pkg]
-    if upgrades:
-        return {"can": False, "why": "update", "count": len(t), "upgrades": upgrades[:6]}
-    f = facts([n for n, _ in t])
-    need = sum(f.get(n, {}).get("size", 0) for n, _ in t)
+    upgrades = [n for n, _, _ in t if n in inst and n != pkg]
+    waiting = run(["pacman", "-Qu"]).strip() != ""
+    if upgrades or waiting or gone([u for _, _, u in t]):
+        # the app needs the waiting updates with it (or this computer's list is out of date): say what that brings
+        return dict({"can": False, "why": "update", "count": len(t)}, **(pending(pkg) if ask else {}))
+    f = facts([n for n, _, _ in t])
+    need = sum(f.get(n, {}).get("size", 0) for n, _, _ in t)
     free = shutil.disk_usage("/").free // 1_000_000
     if need + 500 > free:
         return {"can": False, "why": "space", "count": len(t), "need": need, "freeMB": free}
-    return {"can": True, "count": len(t), "download": sum(s for _, s in t), "need": need}
+    return {"can": True, "count": len(t), "download": sum(s for _, s, _ in t), "need": need}
 
 
 def app(pkg):
@@ -346,7 +624,12 @@ def app(pkg):
     with ThreadPoolExecutor(4) as pool:   # the developers' sites, all at once
         paths = list(pool.map(shot, [x["url"] for x in c.get("shots", [])[:4]]))
     a["shots"] = [{"path": p, "caption": x["caption"]} for p, x in zip(paths, c.get("shots", [])[:4]) if p]
-    a["hero"] = cropped(a["shots"][0]["path"], ed["apps"].get(pkg, {}).get("crop")) if a["shots"] else ""
+    # the hero: the work alone when the store has a crop for it (shown across the window), else its first screenshot as it is
+    # (shown framed, as a window); its aspect so the page can lay it out before it loads
+    work = cover(pkg, ed, cat) or (cropped(a["shots"][0]["path"], ed["apps"][pkg]["crop"]) if a["shots"] and ed["apps"].get(pkg, {}).get("crop") else "")
+    a["hero"] = work or (a["shots"][0]["path"] if a["shots"] else "")
+    a["heroWork"] = bool(work)
+    a["heroAspect"] = aspect(a["hero"]) if a["hero"] else 1.6
     a["tone"] = tone(a["hero"] or a["icon"])
     a["description"] = c.get("description", [])[:2]
     rel = c.get("release")
@@ -366,6 +649,8 @@ def why(code, lines):
         return "cancelled"
     if "unable to lock database" in text:
         return "busy"
+    if "returned error: 403" in text or "returned error: 404" in text or "returned error: 410" in text:
+        return "update"
     if "failed retrieving file" in text or "could not resolve" in text or "failed to download" in text:
         return "offline"
     if "not enough free disk space" in text:
@@ -373,31 +658,46 @@ def why(code, lines):
     return "failed"
 
 
-def install(pkg):
+def install(pkg, everything=False):
+    """get one app. With `everything`, the whole system is brought up to date in the same step (pacman -Syu <app>): the
+    only safe way to get an app once this computer's list of packages is out of date (never -Sy alone)"""
     inst = installed()
     if pkg in inst:
         return out({"result": "ok"})
-    p = plan(pkg, inst)
-    if not p["can"]:
-        return out({"result": p["why"], "plan": p})
+    if not everything:
+        r = bundle_install(pkg)
+        if r != "system" and r != "unavailable":
+            return out({"result": r})
+    if everything:
+        p = {"count": 40}
+    else:
+        p = system_plan(pkg, inst)
+        if not p["can"]:
+            return out({"result": p["why"], "plan": p})
     total, dl, done_inst, n = max(1, p["count"]), 0, 0, 0
+    what = "updates " if everything else ""
     out({"progress": 0.02, "phase": "Waiting for your password"})
-    proc = subprocess.Popen(PKEXEC + ["-S", "--noconfirm", "--needed", pkg], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, errors="replace")
+    args = ["-Syu", "--noconfirm", "--needed", pkg] if everything else ["-S", "--noconfirm", "--needed", pkg]
+    proc = subprocess.Popen(PKEXEC + args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     lines = []
     for line in proc.stdout:
         line = line.rstrip()
         lines.append(line)
-        if line.endswith("downloading...") or re.search(r"\sdownloading\b", line):
+        m = re.match(r"Packages \((\d+)\)", line)
+        if m:
+            total = max(1, int(m.group(1)))
+        if line.startswith(":: Synchronizing package databases"):
+            out({"progress": 0.03, "phase": "Getting the latest list"})
+        elif line.endswith("downloading...") or re.search(r"\sdownloading\b", line):
             dl += 1
-            out({"progress": 0.05 + 0.6 * min(dl, total) / total, "phase": f"Downloading {min(dl, total)} of {total}"})
+            out({"progress": 0.05 + 0.6 * min(dl, total) / total, "phase": f"Downloading {what}{min(dl, total)} of {total}"})
         elif line.startswith(":: Processing package changes"):
             out({"progress": 0.7, "phase": "Installing"})
         else:
             m = re.match(r"\(\s*(\d+)/(\d+)\)\s+(installing|reinstalling|upgrading)\s", line)
             if m:
                 done_inst, n = int(m.group(1)), int(m.group(2))
-                out({"progress": 0.7 + 0.28 * done_inst / max(1, n), "phase": f"Installing {done_inst} of {n}"})
+                out({"progress": 0.7 + 0.28 * done_inst / max(1, n), "phase": f"Installing {what}{done_inst} of {n}"})
     code = proc.wait()
     if code == 0:
         return out({"result": "ok"})
@@ -405,6 +705,10 @@ def install(pkg):
 
 
 def remove(pkg):
+    if pkg in bundles():
+        # the app's folder and its launcher go; what it saved stays, as on a Mac, should it come back
+        r = subprocess.run(BUNDLE + ["remove", pkg], capture_output=True)
+        return out({"result": "ok" if r.returncode == 0 else "failed"})
     ed, inst = editorial(), installed()
     names = [pkg] + ed["apps"].get(pkg, {}).get("also", [])
     have = next((n for n in names if n in inst), None)
@@ -419,8 +723,8 @@ def remove(pkg):
 
 if __name__ == "__main__":
     cmd, args = (sys.argv[1] if len(sys.argv) > 1 else ""), sys.argv[2:]
-    commands = {"home": lambda: home(), "search": lambda: search(args), "app": lambda: app(args[0]),
-                "install": lambda: install(args[0]), "remove": lambda: remove(args[0])}
+    commands = {"home": lambda: home(), "search": lambda: search(args), "serve": lambda: serve(), "app": lambda: app(args[0]),
+                "install": lambda: install(args[0], "--everything" in args[1:]), "remove": lambda: remove(args[0])}
     if cmd not in commands or (cmd in ("app", "install", "remove") and not args):
         print(__doc__, file=sys.stderr)
         sys.exit(2)

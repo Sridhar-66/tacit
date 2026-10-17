@@ -1,8 +1,8 @@
 {
-  "default": {"network": true, "files": "user-folders", "devices": ["gpu", "audio"], "x11": false, "talk": []},
+  "default": {"network": true, "files": "user-folders", "devices": ["gpu", "audio"], "x11": true, "talk": []},
   "apps": {
-    "gnome-mines": {"network": false, "files": "none", "devices": ["gpu", "audio"]},
-    "gnome-sudoku": {"network": false, "files": "none", "devices": ["gpu"]},
+    "gnome-mines": {"network": false, "files": "none", "devices": ["gpu", "audio"], "x11": false},
+    "gnome-sudoku": {"network": false, "files": "none", "devices": ["gpu"], "x11": false},
     "obs-studio": {"devices": ["gpu", "audio", "microphone", "camera"]}
   }
 }
