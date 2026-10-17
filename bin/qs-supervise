@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# qs-supervise - start the Quickshell shell with bounded crash-loop backoff.
+#
+# Failure floor: without this, a shell that segfaults on startup is respawned by
+# nothing (it just stays dead) or, worse, respawned forever by whatever restarts
+# it. This runs qs in a supervised loop: a shell that dies quickly is retried a
+# bounded number of times with increasing delay, then we give up and leave a note
+# the user can read from a TTY.
+#
+# Output still goes to ~/.cache/qs-startup.log, same as the exec line it replaced.
+set -u
+
+TACIT_SHELL=${TACIT_SHELL:-$HOME/.config/quickshell/tacit}  # the shell's folder (the package sets TACIT_SHELL)
+CONFIG="${qsConfig:-tacit}"   # the name an older start used; still recognised below
+LOG="$HOME/.cache/qs-startup.log"
+NOTE="$HOME/.cache/qs-crashloop.txt"
+# Never /tmp: that path is shared between users, and this pidfile is signalled.
+PIDFILE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qs-supervise.pid"
+
+MAX_TRIES=5           # consecutive fast crashes before giving up
+MAX_TOTAL=60          # lifetime restarts before giving up, however long each ran.
+                      # Without this, a shell that dies just after MIN_UPTIME resets
+                      # the consecutive counter every time and flaps forever, silently.
+MIN_UPTIME=10          # seconds; exiting sooner than this counts as a crash
+BACKOFF=(1 2 5 10 20)  # delay before retry N+1
+
+mkdir -p "$HOME/.cache" 2>/dev/null || true
+
+# --- take over from a previous supervisor -----------------------------------
+# Makes this script safe to invoke again (e.g. the restart keybind) without
+# ending up with two supervisors fighting over one shell.
+if [ -r "$PIDFILE" ]; then
+    old=$(cat "$PIDFILE" 2>/dev/null || true)
+    case "$old" in
+        ''|*[!0-9]*) ;;
+        "$$") ;;
+        *)
+            # Only ever signal something that is actually this script. A pidfile in
+            # /run/user survives a Hyprland restart, so the PID may have been recycled
+            # onto anything - including Hyprland itself.
+            if kill -0 "$old" 2>/dev/null && tr '\0' ' ' < "/proc/$old/cmdline" 2>/dev/null | grep -q 'qs-supervise'; then
+                kill -TERM "$old" 2>/dev/null || true
+                for _ in 1 2 3 4 5 6 7 8 9 10; do
+                    kill -0 "$old" 2>/dev/null || break
+                    sleep 0.2
+                done
+                kill -KILL "$old" 2>/dev/null || true
+            fi
+            ;;
+    esac
+fi
+echo $$ > "$PIDFILE" 2>/dev/null || true
+
+child=""
+stopping=0
+cleanup() {
+    stopping=1
+    [ -n "$child" ] && kill -TERM "$child" 2>/dev/null
+    [ "$(cat "$PIDFILE" 2>/dev/null || true)" = "$$" ] && rm -f "$PIDFILE"
+    exit 0
+}
+trap cleanup TERM INT HUP
+
+# Clear out a shell left behind by a previous supervisor or a manual start -- but only the
+# desktop shell. The boot lock (qs -p .../bootlock.qml) is a separate quickshell instance
+# that must survive us: killing it made its exec-once fall back to hyprlock at every boot.
+# Positive match only: a process we cannot read is left alone rather than killed. It must be
+# OUR config: `-c ` alone also matched another config the user runs and every transient
+# `qs -c tacit ipc call ...` helper, which is also named qs.
+old=""
+for p in $(pgrep -u "$(id -u)" -x 'qs|quickshell'); do
+    cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) || continue
+    case "$cmd" in *" ipc "*) continue ;; esac
+    if printf '%s' "$cmd" | grep -qE "(^| )((-c|--config) +$CONFIG|(-p|--path) +$TACIT_SHELL(/shell\.qml)?/?)( |$)"; then
+        kill -TERM "$p" 2>/dev/null || true
+        old="$old $p"
+    fi
+done
+# Wait for them to actually go. Quickshell tears down every layer surface and the Wayland
+# connection on TERM, which routinely takes longer than the flat 0.3s this used to sleep, and
+# an overlapping instance steals every `qs ipc` call: ipc targets the OLDEST instance, so the
+# keybinds would talk to the dying shell.
+for p in $old; do
+    for _ in $(seq 50); do
+        kill -0 "$p" 2>/dev/null || break
+        sleep 0.1
+    done
+    kill -KILL "$p" 2>/dev/null || true
+done
+
+# Append, never truncate: the log is the only evidence of a crash loop, and the
+# restart keybind is exactly what you press while trying to collect it.
+{ printf '\n########## qs-supervise session start %s ##########\n' "$(date '+%F %T')"; } >> "$LOG" 2>/dev/null || true
+
+# Keep it from growing without bound. The shell is a chatty writer, so a single long session
+# reaches the ceiling on its own: this runs before every attempt, not only at startup.
+trim_log() {
+    if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 2000000 ]; then
+        tail -c 500000 "$LOG" > "$LOG.trim" 2>/dev/null && mv "$LOG.trim" "$LOG" 2>/dev/null || true
+    fi
+}
+trim_log
+
+try=0
+total=0
+while :; do
+    try=$((try + 1))
+    total=$((total + 1))
+    printf '\n===== qs-supervise: attempt %d/%d at %s =====\n' \
+        "$try" "$MAX_TRIES" "$(date '+%F %T')" >> "$LOG" 2>/dev/null
+
+    start=$SECONDS
+    # -n: exit at once if an instance of this config is somehow still up, rather than run two
+    # (the second one is invisible but takes every ipc call that arrives while both live).
+    qs -n -p "$TACIT_SHELL" >> "$LOG" 2>&1 &
+    child=$!
+    wait "$child"
+    rc=$?
+    child=""
+    trim_log
+    [ "$stopping" = 1 ] && exit 0
+    up=$((SECONDS - start))
+
+    if [ "$rc" = 0 ]; then
+        echo "qs-supervise: qs exited cleanly (rc=0) after ${up}s; not restarting." \
+            >> "$LOG" 2>/dev/null
+        rm -f "$PIDFILE"
+        exit 0
+    fi
+
+    if [ "$up" -ge "$MIN_UPTIME" ]; then
+        echo "qs-supervise: qs ran ${up}s then exited rc=$rc; restarting, retry counter reset." \
+            >> "$LOG" 2>/dev/null
+        try=0
+        if [ "$total" -ge "$MAX_TOTAL" ]; then
+            echo "qs-supervise: $total restarts this session; giving up to avoid an endless flap." >> "$LOG" 2>/dev/null
+            break
+        fi
+        sleep 1
+        continue
+    fi
+
+    if [ "$try" -ge "$MAX_TRIES" ]; then
+        break
+    fi
+    d=${BACKOFF[$((try - 1))]}
+    echo "qs-supervise: qs died after ${up}s (rc=$rc); retry $((try + 1))/$MAX_TRIES in ${d}s." \
+        >> "$LOG" 2>/dev/null
+    sleep "$d"
+done
+
+# --- gave up ----------------------------------------------------------------
+{
+    echo "qs-supervise gave up at $(date '+%F %T')"
+    echo
+    echo "The Quickshell shell ($TACIT_SHELL) kept dying: $try in a row, $total this"
+    echo "session. It has NOT been restarted."
+    echo
+    echo "Hyprland itself is still running. Recovery:"
+    echo "  SUPER + Return          open a terminal"
+    echo "  CTRL + SUPER + R        try starting the shell again"
+    echo "  SUPER + L               lock (hyprlock, independent of the shell)"
+    echo "  CTRL + ALT + F2         switch to a TTY"
+    echo
+    echo "Last 60 lines of $LOG:"
+    echo "-------------------------------------------------------------"
+    tail -n 60 "$LOG" 2>/dev/null
+} > "$NOTE" 2>/dev/null
+
+# Hyprland's own notifier works without the shell's notification daemon.
+hyprctl notify -1 15000 "rgb(ff5555)" \
+    "Shell crash-looped $MAX_TRIES times - gave up. See ~/.cache/qs-crashloop.txt" \
+    >/dev/null 2>&1 || true
+notify-send -u critical "Shell gave up" \
+    "Quickshell crash-looped. See ~/.cache/qs-crashloop.txt" >/dev/null 2>&1 || true
+
+rm -f "$PIDFILE"
+exit 1

@@ -1,0 +1,25 @@
+#!/bin/sh
+# Open or start a Claude session in the Claude app (claude.qml) and bring it forward.
+#   claude-hand new <folder> <prompt>   a new session in <folder>, already working on <prompt>
+#   claude-hand open <session-id>       show that session
+#   claude-hand attach <file>           attach a file to the open session (region selector)
+#   claude-hand show                    just the app (claude-app, the launcher)
+# Used by the shell's "Hand to Claude" (Recents.launch) and the notch. If the app cannot be
+# reached, a new session falls back to foot + claude as before.
+#
+# The probe, the single-launch lock, the poll and the failure notice are tacit-app's, shared with
+# the editor's two entry points.
+T_BIN=${TACIT_BIN:-$HOME/.local/bin}                          # Tacit's launchers (the package sets TACIT_BIN)
+T="$T_BIN/tacit-app"
+"$T" ensure praxis >/dev/null || {
+	[ "${1:-}" = new ] && exec foot -D "$2" claude "$3"
+	exit 1
+}
+case "${1:-}" in
+	new) "$T" call praxis handoff "$2" "$3" ;;
+	open) "$T" call praxis open "$2" ;;
+	attach) "$T" call praxis attach "$2" ;;
+	*) "$T" call praxis present ;;
+esac
+"$T" focus praxis
+exit 0

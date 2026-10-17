@@ -1,0 +1,11 @@
+[Unit]
+Description=Tacit: look for updates every few hours and download them
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=6h
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

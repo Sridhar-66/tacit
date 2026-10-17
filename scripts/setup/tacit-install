@@ -1,0 +1,422 @@
+#!/usr/bin/env python3
+# tacit-install: Tacit onto a disk, from Tacit's live system. Run as root by setupd.py (sudo); talks JSON lines.
+#   in:  {"disk": "/dev/vda", "place": "instead"}  the disk to erase, once; or
+#        {"disk": ..., "place": "next", "keep": N}  next to what is on it: in its biggest free stretch, or in room made by
+#                                                 shrinking Windows to N bytes (keep: null uses free room only)
+#        {"answers": {name, password, language, layout}}   the person, whenever Setup has them (the install waits for
+#                                                 them only at its last step); the password never reaches a log
+#   out: {"state": "running", "done": 0.42, "step": "copying"}, then {"state": "done"} or
+#        {"state": "failed", "reason": "...", "untouched": true|false}  (untouched: nothing on the disk was changed yet)
+# Next to another system: Windows (NTFS) is shrunk with ntfsresize and its partition entry with sfdisk, keeping its
+# identity; Tacit gets a boot partition (XBOOTLDR, 1 GiB, FAT) and its own (ext4) in the free room, and systemd-boot goes
+# into the disk's EFI partition, which is not formatted. systemd-boot lists Windows by itself; holding Space shows it.
+# Refused before anything changes: no GPT or no EFI partition, BitLocker, a Windows that did not shut down fully (Fast
+# Startup's hibernation or a volume due a check), or less than 32 GB of room for Tacit.
+# Instead: a GPT disk with an EFI partition (1 GiB) and Tacit (ext4, the rest); the live system's own image copied
+# onto it (offline, exactly what ran from the stick), the live system's own parts taken out (/usr/share/tacit/live-files,
+# written when the ISO is made), its kernel's initramfs made again, systemd-boot, the person's account, language and
+# keyboard, the Wi-Fi network joined in Setup; NVIDIA's driver only where there is an NVIDIA card. UEFI computers only,
+# for now.
+# It refuses anything but Tacit's live system (/run/archiso), the stick it runs from, and a disk with anything mounted.
+import glob, json, os, re, shutil, subprocess, sys, time
+
+TARGET = "/mnt/tacit"
+state = {"touched": False, "t0": time.time()}
+ESP = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+WINDOWS_DATA = "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"
+MIN_TACIT = 32 * 1000 ** 3              # setupd.py offers "next to" from this much room (Tacit is about 7 GB)
+WINDOWS_SPARE = 20 * 1000 ** 3          # Windows keeps at least this much free after shrinking
+
+
+def say(obj):
+    sys.stdout.write(json.dumps(obj, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+def progress(done, step):
+    say({"state": "running", "done": round(done, 3), "step": step})
+
+
+class Refused(Exception):
+    pass
+
+
+def sh(*cmd, inp=None):
+    r = subprocess.run(cmd, input=inp, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise Refused(f"{cmd[0]} failed: {(r.stderr or r.stdout).strip()[-300:]}")
+    return r.stdout
+
+
+def chroot(*cmd, inp=None):
+    return sh("arch-chroot", TARGET, *cmd, inp=inp)
+
+
+def partitions(disk):
+    out = sh("lsblk", "-nrpo", "NAME,TYPE", disk)
+    return [l.split()[0] for l in out.splitlines() if l.split()[1:] == ["part"]]
+
+
+def check(disk):
+    if not os.path.isdir("/run/archiso"):
+        raise Refused("this is not Tacit's live system")
+    if not re.fullmatch(r"/dev/(nvme\d+n\d+|[sv]d[a-z]+|mmcblk\d+)", disk or ""):
+        raise Refused(f"not a whole disk: {disk}")
+    info = json.loads(sh("lsblk", "-J", "-b", "-o", "NAME,TYPE,MOUNTPOINTS,SIZE", disk))["blockdevices"][0]
+    if info["type"] != "disk":
+        raise Refused(f"{disk} is not a disk")
+    if info["size"] < 32 * 1000 ** 3:
+        raise Refused("the disk is smaller than 32 GB")
+    for d in [info] + info.get("children", []):
+        if any(m for m in (d.get("mountpoints") or []) if m):
+            raise Refused(f"{d['name']} is in use")
+    boot = sh("findmnt", "-nro", "SOURCE", "/run/archiso/bootmnt").strip() if os.path.ismount("/run/archiso/bootmnt") else ""
+    if boot and sh("lsblk", "-nrpso", "NAME", boot).split()[-1] == disk:
+        raise Refused("that is the stick Tacit runs from")
+
+
+def part_dev(disk, n):
+    return f"{disk}p{n}" if disk[-1].isdigit() else f"{disk}{n}"
+
+
+def table(disk):
+    return json.loads(sh("sfdisk", "--json", disk))["partitiontable"]
+
+
+def gaps(t):
+    """The disk's free stretches in sectors, (first, last), starting on a 1 MiB boundary."""
+    align = max(1, 1024 * 1024 // t["sectorsize"])
+    out, at = [], t["firstlba"]
+    for start, size in sorted((p["start"], p["size"]) for p in t["partitions"]) + [(t["lastlba"] + 1, 0)]:
+        first = -(-at // align) * align
+        if start - 1 >= first:
+            out.append((first, start - 1))
+        at = max(at, start + size)
+    return out
+
+
+def fstype(dev):
+    return subprocess.run(["blkid", "-s", "TYPE", "-o", "value", dev], capture_output=True, text=True).stdout.strip()
+
+
+def windows_shrink(t, keep):
+    """How Windows's own partition (the biggest NTFS one) goes down to keep bytes: (partition, sectors), None when it is
+    that small already. Refuses a Windows that must not be resized."""
+    ntfs = [p for p in t["partitions"] if p["type"].lower() == WINDOWS_DATA and fstype(p["node"]) == "ntfs"]
+    if not ntfs:
+        raise Refused("there is no Windows partition to make room in")
+    win = max(ntfs, key=lambda p: p["size"])
+    node, ss = win["node"], t["sectorsize"]
+    # a volume due a check, or one Fast Startup hibernated, has state Windows keeps in memory: never resized
+    info = subprocess.run(["ntfsresize", "--info", "--no-action", node], input="", capture_output=True, text=True)
+    hib = subprocess.run(["sh", "-c", 'ntfscat "$1" hiberfil.sys 2>/dev/null | head -c 4', "sh", node], capture_output=True).stdout.lower()
+    if info.returncode != 0 or hib == b"hibr":
+        raise Refused("Windows did not shut down fully")
+    m = re.search(r"You might resize at (\d+) bytes", info.stdout)
+    if not m:
+        raise Refused("ntfsresize did not say how small Windows can be")
+    align = max(1, 1024 * 1024 // ss)
+    sectors = int(keep) // ss // align * align
+    if sectors * ss < int(m.group(1)) + WINDOWS_SPARE:
+        raise Refused("Windows needs more room than that")
+    return (win, sectors) if sectors < win["size"] else None
+
+
+def shrink_windows(disk, win, sectors, ss):
+    """The volume with ntfsresize, then its partition entry."""
+    node, size = win["node"], sectors * ss
+    sh("ntfsresize", "--no-action", "--force", "--size", str(size), node, inp="")
+    # from here the disk is changed: the volume first, then its partition entry (same start, GUID, name and type)
+    state["touched"] = True
+    sh("ntfsresize", "--force", "--size", str(size), node, inp="")
+    number = int(re.search(r"(\d+)$", node).group(1))
+    sh("sfdisk", "--no-reread", "--no-tell-kernel", "-q", "-N", str(number), disk, inp=f"{win['start']},{sectors}\n")
+
+
+def make_room(disk, keep):
+    """Tacit's boot partition and its own in the biggest free stretch, after shrinking Windows when asked.
+    Returns the EFI partition, the boot partition and Tacit's."""
+    t = table(disk)
+    if t.get("label") != "gpt":
+        raise Refused("the disk does not use GPT")
+    esp = [p["node"] for p in t["partitions"] if p["type"].lower() == ESP]
+    if not esp:
+        raise Refused("the disk has no EFI partition")
+    if any(fstype(p["node"]) == "BitLocker" for p in t["partitions"]):
+        raise Refused("BitLocker is on")
+    ss = t["sectorsize"]
+    shrink = windows_shrink(t, keep) if keep else None
+    # the room there will be, worked out before anything changes
+    planned = dict(t, partitions=[dict(p, size=shrink[1]) if shrink and p is shrink[0] else p for p in t["partitions"]])
+    first, last = max(gaps(planned), key=lambda g: g[1] - g[0])
+    if (last - first + 1) * ss < MIN_TACIT:
+        raise Refused("there is not enough room for Tacit")
+    if shrink:
+        shrink_windows(disk, *shrink, ss)
+        t = table(disk)
+        first, last = max(gaps(t), key=lambda g: g[1] - g[0])
+    taken = {int(re.search(r"(\d+)$", p["node"]).group(1)) for p in t["partitions"]}
+    boot_n, root_n = [n for n in range(1, 129) if n not in taken][:2]
+    boot_last = first + 1024 ** 3 // ss - 1
+    state["touched"] = True
+    sh("sgdisk", f"-n{boot_n}:{first}:{boot_last}", f"-t{boot_n}:ea00", f"-c{boot_n}:Tacit boot",
+       f"-n{root_n}:{boot_last + 1}:{last}", f"-t{root_n}:8304", f"-c{root_n}:Tacit", disk)
+    return esp[0], part_dev(disk, boot_n), part_dev(disk, root_n)
+
+
+def image():
+    found = glob.glob("/run/archiso/copytoram/airootfs.sfs") + glob.glob("/run/archiso/bootmnt/*/x86_64/airootfs.sfs")
+    if not found:
+        raise Refused("the live system's image is not there")
+    return found[0]
+
+
+def install(disk, place, keep):
+    check(disk)
+    sfs = image()
+    progress(0.01, "disk")
+    if place == "next":
+        # the disk's EFI partition keeps what is on it; Tacit's kernels go on its own boot partition (/boot)
+        efi, boot, root = make_room(disk, keep)
+        sh("partprobe", disk)
+        sh("udevadm", "settle")
+        sh("mkfs.fat", "-F32", "-n", "TACITBOOT", boot)
+        sh("mkfs.ext4", "-F", "-q", "-L", "Tacit", root)
+        os.makedirs(TARGET, exist_ok=True)
+        sh("mount", root, TARGET)
+        for where, dev in (("boot", boot), ("efi", efi)):
+            os.makedirs(f"{TARGET}/{where}", exist_ok=True)
+            sh("mount", "-o", "fmask=0077,dmask=0077", dev, f"{TARGET}/{where}")
+    else:
+        # from here the disk is changed
+        state["touched"] = True
+        sh("sgdisk", "--zap-all", disk)
+        sh("wipefs", "-af", disk)
+        sh("sgdisk", "-n1:0:+1G", "-t1:ef00", "-c1:EFI", "-n2:0:0", "-t2:8304", "-c2:Tacit", disk)
+        sh("partprobe", disk)
+        sh("udevadm", "settle")
+        efi, root = partitions(disk)[:2]
+        sh("mkfs.fat", "-F32", "-n", "EFI", efi)
+        sh("mkfs.ext4", "-F", "-q", "-L", "Tacit", root)
+        os.makedirs(TARGET, exist_ok=True)
+        sh("mount", root, TARGET)
+        os.makedirs(f"{TARGET}/boot", exist_ok=True)
+        sh("mount", "-o", "fmask=0077,dmask=0077", efi, f"{TARGET}/boot")
+    progress(0.05, "copying")
+
+    # the live system's image, as it ran: unsquashfs says how far it is in percent
+    p = subprocess.Popen(["unsquashfs", "-f", "-d", TARGET, "-percentage", sfs], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    last = 0
+    for line in p.stdout:
+        if line.strip().isdigit():
+            pct = int(line.strip())
+            if pct >= last + 1:
+                last = pct
+                progress(0.05 + 0.70 * pct / 100, "copying")
+    if p.wait() != 0:
+        raise Refused(f"copying failed: {p.stderr.read().strip()[-300:]}")
+
+    # the live system's own parts out; the package defaults they had replaced back
+    progress(0.76, "system")
+    listed = f"{TARGET}/usr/share/tacit/live-files"
+    for rel in (open(listed).read().split() if os.path.exists(listed) else []):
+        path = os.path.normpath(f"{TARGET}/{rel}")
+        if path.startswith(TARGET + "/") and (os.path.islink(path) or os.path.isfile(path)):
+            os.remove(path)
+    with open(f"{TARGET}/etc/mkinitcpio.d/linux.preset", "w") as f:
+        f.write('ALL_kver="/boot/vmlinuz-linux"\nPRESETS=("default")\ndefault_image="/boot/initramfs-linux.img"\n')
+    kernels = glob.glob(f"{TARGET}/usr/lib/modules/*/vmlinuz")
+    if not kernels:
+        raise Refused("no kernel in the image")
+    shutil.copy(kernels[0], f"{TARGET}/boot/vmlinuz-linux")
+    with open(f"{TARGET}/etc/fstab", "w") as f:
+        f.write(sh("genfstab", "-U", TARGET))
+    # Hibernate: a swap file the size of memory, when 20 GB stay free beside it (zram, ahead of it, is where the system
+    # swaps day to day); the boot entry's resume= names it. The offset is where its first extent starts, in pages.
+    offset = None
+    size = -(-int(open("/proc/meminfo").read().split()[1]) // 1024 ** 2) * 1024 ** 3
+    st = os.statvfs(TARGET)
+    if st.f_bavail * st.f_frsize - size >= 20 * 1000 ** 3:
+        sh("fallocate", "-l", str(size), f"{TARGET}/swapfile")
+        os.chmod(f"{TARGET}/swapfile", 0o600)
+        sh("mkswap", f"{TARGET}/swapfile")
+        with open(f"{TARGET}/etc/fstab", "a") as f:
+            f.write("/swapfile none swap defaults,pri=10 0 0\n")
+        first = re.search(r"^\s*0:\s*0\.\.\s*\d+:\s*(\d+)\.\.", sh("filefrag", "-v", f"{TARGET}/swapfile"), re.M)
+        offset = int(first.group(1)) * st.f_bsize // os.sysconf("SC_PAGE_SIZE")
+    with open(f"{TARGET}/etc/hostname", "w") as f:
+        f.write("tacit\n")
+    # a new machine id at the first start
+    with open(f"{TARGET}/etc/machine-id", "w") as f:
+        f.write("uninitialized\n")
+    # NVIDIA's driver only where there is an NVIDIA display card (PCI vendor 0x10de, class 03xx)
+    if not nvidia_present() and subprocess.run(["arch-chroot", TARGET, "pacman", "-Q", "nvidia-open"], capture_output=True).returncode == 0:
+        chroot("pacman", "-Rns", "--noconfirm", "nvidia-open", "nvidia-utils")
+    progress(0.80, "starting")
+    chroot("mkinitcpio", "-P")
+    progress(0.88, "starting")
+    if place == "next":
+        chroot("bootctl", "install", "--esp-path=/efi", "--boot-path=/boot")
+    else:
+        chroot("bootctl", "install", "--esp-path=/boot")
+    partuuid = sh("blkid", "-s", "PARTUUID", "-o", "value", root).strip()
+    resume = f" resume=PARTUUID={partuuid} resume_offset={offset}" if offset is not None else ""
+    os.makedirs(f"{TARGET}/boot/loader/entries", exist_ok=True)
+    with open(f"{TARGET}/boot/loader/entries/tacit.conf", "w") as f:
+        f.write(f"title Tacit\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=PARTUUID={partuuid} rw quiet splash loglevel=1 rd.udev.log_level=0 udev.log_level=0 systemd.show_status=false rd.systemd.show_status=false vt.global_cursor_default=0{resume}\n")
+    # loader.conf is read from the EFI partition only
+    with open(f"{TARGET}/{'efi' if place == 'next' else 'boot'}/loader/loader.conf", "w") as f:
+        f.write("default tacit.conf\ntimeout 0\neditor no\n")
+    # next to another Linux: systemd-boot finds Windows by itself, not GRUB, so each other system's loader on the EFI
+    # partition gets an entry (shown with Space, as Windows is)
+    if place == "next":
+        for path in sorted(glob.glob(f"{TARGET}/efi/EFI/*/grubx64.efi") + glob.glob(f"{TARGET}/efi/EFI/*/shimx64.efi")):
+            vendor = os.path.basename(os.path.dirname(path))
+            if vendor.lower() in ("microsoft", "boot", "systemd", "linux") or os.path.exists(f"{TARGET}/efi/loader/entries/{vendor}.conf"):
+                continue
+            os.makedirs(f"{TARGET}/efi/loader/entries", exist_ok=True)
+            with open(f"{TARGET}/efi/loader/entries/{vendor}.conf", "w") as f:
+                f.write(f"title {vendor[:1].upper() + vendor[1:]}\nefi /EFI/{vendor}/{os.path.basename(path)}\n")
+    progress(0.92, "keys")
+    chroot("pacman-key", "--init")
+    chroot("pacman-key", "--populate", "archlinux", "tacit")
+    # Tacit's own packages and their updates, ahead of Arch's (signed with Tacit's key, which tacit-keyring brought):
+    # the update server hands out the store's files (tacit-packages on Cloud Run, the bucket mounted read-only)
+    conf = open(f"{TARGET}/etc/pacman.conf").read()
+    if "[tacit]" not in conf:
+        tacit = ("[tacit]\nSigLevel = Required DatabaseRequired\n"
+                 "Server = https://tacit-packages-56470275759.europe-north1.run.app/$arch\n\n")
+        with open(f"{TARGET}/etc/pacman.conf", "w") as f:
+            f.write(conf.replace("[core]\n", tacit + "[core]\n", 1) if "\n[core]\n" in conf else conf + "\n" + tacit)
+    # Arch's own worldwide mirrors: the list its package installs has every server commented out, and the stick's list
+    # was one of the live system's files, so [core] and [extra] had no server and no update or app could come
+    with open(f"{TARGET}/etc/pacman.d/mirrorlist", "w") as f:
+        f.write("Server = http://mirror.archlinuxarm.org/$arch/$repo\n" if os.uname().machine == "aarch64" else
+                "Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch\nServer = https://fastly.mirror.pkgbuild.com/$repo/os/$arch\n")
+    # the Wi-Fi network joined in Setup, so the new system is online at once
+    live_nm = "/etc/NetworkManager/system-connections"
+    if os.path.isdir(live_nm):
+        os.makedirs(f"{TARGET}{live_nm}", exist_ok=True)
+        for c in glob.glob(f"{live_nm}/*.nmconnection"):
+            shutil.copy2(c, f"{TARGET}{live_nm}/")
+            os.chmod(f"{TARGET}{live_nm}/{os.path.basename(c)}", 0o600)
+    progress(0.95, "account")
+
+
+def nvidia_present():
+    for d in glob.glob("/sys/bus/pci/devices/*"):
+        try:
+            if open(f"{d}/vendor").read().strip() == "0x10de" and open(f"{d}/class").read().strip().startswith("0x03"):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def username(name):
+    base = re.sub(r"[^a-z0-9]", "", (name.split() or ["user"])[0].lower())
+    if not base or not base[0].isalpha() or base in ("root", "tacit", "sddm", "nobody", "bin", "daemon"):
+        base = "user" + base
+    return base[:32]
+
+
+def account(answers):
+    name = (answers.get("name") or "").strip()
+    password = answers.get("password") or ""
+    if not name or not password:
+        raise Refused("no name or password")
+    user = username(name)
+    lang = answers.get("language") or "en_GB"
+    if not re.fullmatch(r"[a-z]{2,3}_[A-Z]{2}", lang):
+        lang = "en_GB"
+    supported = open(f"{TARGET}/usr/share/i18n/SUPPORTED").read()
+    locale = f"{lang}.UTF-8" if f"{lang}.UTF-8 UTF-8" in supported else "en_GB.UTF-8"
+    with open(f"{TARGET}/etc/locale.gen", "a") as f:
+        f.write(f"\n{locale} UTF-8\n")
+    chroot("locale-gen")
+    with open(f"{TARGET}/etc/locale.conf", "w") as f:
+        f.write(f"LANG={locale}\n")
+    # the time zone Setup found from the network (setupd.find_zone), kept right by network time; UTC when none was found
+    tz = answers.get("timezone") or ""
+    if re.fullmatch(r"[A-Za-z0-9_+/-]+", tz) and os.path.isfile(f"{TARGET}/usr/share/zoneinfo/{tz}"):
+        if os.path.lexists(f"{TARGET}/etc/localtime"):
+            os.remove(f"{TARGET}/etc/localtime")
+        os.symlink(f"/usr/share/zoneinfo/{tz}", f"{TARGET}/etc/localtime")
+    chroot("systemctl", "enable", "systemd-timesyncd.service")
+    layout = answers.get("layout") or "us"
+    if re.fullmatch(r"[a-z]{2,8}", layout):
+        os.makedirs(f"{TARGET}/etc/X11/xorg.conf.d", exist_ok=True)
+        with open(f"{TARGET}/etc/X11/xorg.conf.d/00-keyboard.conf", "w") as f:
+            f.write(f'Section "InputClass"\n    Identifier "system-keyboard"\n    MatchIsKeyboard "on"\n    Option "XkbLayout" "{layout}"\nEndSection\n')
+        with open(f"{TARGET}/etc/vconsole.conf", "w") as f:
+            f.write(f"XKBLAYOUT={layout}\n")
+    # the live system's root has no password: locked on the installed one
+    chroot("passwd", "-l", "root")
+    # fish, as the owner's (the terminal's prompt and colours are set up for it: tacit-session's fish config)
+    chroot("useradd", "-m", "-G", "wheel,video,audio,input,network", "-c", name, "-s", "/usr/bin/fish", user)
+    chroot("chpasswd", inp=f"{user}:{password}\n")
+    # the picture chosen in Setup, where the shell, its locks and SDDM look for it (it was dropped until 2026-10-16)
+    picture = answers.get("picture") or ""
+    face = f"{TARGET}/usr/share/tacit/shell/assets/setup/planets/{picture}.jpg"
+    if re.fullmatch(r"[a-z]+", picture) and os.path.isfile(face):
+        uid = int(chroot("id", "-u", user).strip())
+        shutil.copyfile(face, f"{TARGET}/home/{user}/.face")
+        os.chown(f"{TARGET}/home/{user}/.face", uid, uid)
+        os.makedirs(f"{TARGET}/var/lib/AccountsService/icons", exist_ok=True)
+        shutil.copyfile(face, f"{TARGET}/var/lib/AccountsService/icons/{user}")
+    # the first boot as the owner's every boot: the splash, the compositor and the lock show the person's still, made from
+    # their wallpaper (switchwall.sh does it on every change); a new account's is Tacit's own, dusk.jpg. Not fatal: the
+    # first start makes it too
+    subprocess.run(["arch-chroot", TARGET, "runuser", "-u", user, "--", "env", f"HOME=/home/{user}",
+                    "/usr/lib/tacit/tacit-boot-ground", "--wallpaper", "/usr/share/tacit/shell/assets/wallpapers/dusk.jpg"],
+                   capture_output=True, timeout=120)
+    # whether to send a report when something breaks, as answered in Setup, for the reporter to read
+    os.makedirs(f"{TARGET}/var/lib/tacit", exist_ok=True)
+    with open(f"{TARGET}/var/lib/tacit/reports", "w") as f:
+        f.write("send\n" if answers.get("reports") else "no\n")
+    # Tacit's services for every person (the packages' user presets: dusk, focus, Files' D-Bus, the keyring, the
+    # folders): Arch applies none of them by itself
+    chroot("systemctl", "--global", "preset-all")
+    with open(f"{TARGET}/etc/sudoers.d/10-wheel", "w") as f:
+        f.write("%wheel ALL=(ALL:ALL) ALL\n")
+    os.chmod(f"{TARGET}/etc/sudoers.d/10-wheel", 0o440)
+    # the login is the shell's boot lock (bootlock.qml): SDDM starts the person's Tacit session at once, the lock asks
+    # for the password, and PAM's login service (the lock's) opens the keyring with it
+    os.makedirs(f"{TARGET}/etc/sddm.conf.d", exist_ok=True)
+    with open(f"{TARGET}/etc/sddm.conf.d/autologin.conf", "w") as f:
+        f.write(f"[Autologin]\nUser={user}\nSession=tacit\nRelogin=false\n")
+    if "pam_gnome_keyring" not in open(f"{TARGET}/etc/pam.d/login").read():
+        with open(f"{TARGET}/etc/pam.d/login", "a") as f:
+            f.write("-auth      optional     pam_gnome_keyring.so\n")
+    # a password changed in Settings (passwd) changes the keyring's too, so the next login still unlocks it
+    if "pam_gnome_keyring" not in open(f"{TARGET}/etc/pam.d/passwd").read():
+        with open(f"{TARGET}/etc/pam.d/passwd", "a") as f:
+            f.write("-password  optional     pam_gnome_keyring.so use_authtok\n")
+
+
+def finish():
+    sh("sync")
+    subprocess.run(["umount", "-R", TARGET], capture_output=True)
+
+
+def main():
+    first = json.loads(sys.stdin.readline() or "{}")
+    try:
+        install(first.get("disk"), first.get("place", "instead"), first.get("keep"))
+        answers = None
+        while answers is None:
+            line = sys.stdin.readline()
+            if not line:
+                raise Refused("Setup went away before the account was made")
+            answers = json.loads(line).get("answers")
+        account(answers)
+        finish()
+        say({"state": "done", "done": 1.0})
+    except Exception as e:
+        reason = str(e) if isinstance(e, Refused) else f"{type(e).__name__}: {e}"
+        subprocess.run(["umount", "-R", TARGET], capture_output=True)
+        say({"state": "failed", "reason": reason, "untouched": not state["touched"]})
+
+
+if __name__ == "__main__":
+    main()

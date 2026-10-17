@@ -1,0 +1,12 @@
+[SddmGreeterTheme]
+Name=Tacit
+Description=Tacit's login screen: the lock screen's look
+Author=Tacit
+License=GPL-3.0-or-later
+Type=sddm-theme
+Version=0.1
+ConfigFile=theme.conf
+MainScript=Main.qml
+Theme-Id=tacit
+Theme-API=2.0
+QtVersion=6

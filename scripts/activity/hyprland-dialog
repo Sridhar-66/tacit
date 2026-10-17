@@ -1,0 +1,58 @@
+#!/bin/bash
+# hyprland-dialog, Tacit's: installed to ~/.local/bin, which comes before /usr/bin on Hyprland's PATH.
+#
+# Hyprland finds an app that stopped answering (it missed its pings) and runs hyprland-dialog with
+# "Application Not Responding" and the buttons Terminate;Wait. That one dialog becomes the notch's
+# prompt instead (IslandController.notAnswering): the answer comes back on a fifo as the button's own
+# text, printed here for Hyprland to act on (Terminate = it kills the app). When the app answers again,
+# Hyprland ends this process and the prompt goes with it. Every other dialog, and this one when the
+# shell is not there to show it, goes to the real hyprland-dialog unchanged.
+real=/usr/bin/hyprland-dialog
+apptitle="" text="" buttons=""
+args=("$@")
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--apptitle) apptitle=$2; shift ;;
+	--text) text=$2; shift ;;
+	--buttons) buttons=$2; shift ;;
+	esac
+	shift
+done
+[ "$apptitle" = "Application Not Responding" ] || exec "$real" "${args[@]}"
+
+# "An application <title> - <class> is not responding." The window, and so its process, from those.
+desc=${text#An application }
+desc=${desc% is not responding.*}
+cls=${desc##* - }
+title=${desc% - *}
+pid=$(hyprctl clients -j 2>/dev/null | python3 -I -c '
+import json, sys
+cls, title = sys.argv[1], sys.argv[2]
+cs = json.load(sys.stdin)
+m = [c for c in cs if c["class"] == cls and c["title"] == title] or [c for c in cs if c["class"] == cls]
+print(m[0]["pid"] if m else 0)' "$cls" "$title" 2>/dev/null)
+
+IFS=';' read -r b1 b2 _ <<<"$buttons"
+fifo="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/tacit-anr-$$"
+rm -f "$fifo" "$fifo.answer"
+mkfifo -m 600 "$fifo" || exec "$real" "${args[@]}"
+# the reader waits in the background: a trap runs during `wait`, not during a blocked foreground read
+head -n1 "$fifo" >"$fifo.answer" &
+reader=$!
+gone() {
+	kill "$reader" 2>/dev/null
+	qs -c tacit ipc call island notAnsweringGone "$$" >/dev/null 2>&1
+	rm -f "$fifo" "$fifo.answer"
+	exit 0
+}
+trap gone TERM INT HUP
+req=$(python3 -I -c 'import json, sys; print(json.dumps({"id": sys.argv[1], "cls": sys.argv[2], "title": sys.argv[3], "pid": int(sys.argv[4] or 0), "fifo": sys.argv[5], "buttons": [sys.argv[6], sys.argv[7]]}))' \
+	"$$" "$cls" "$title" "${pid:-0}" "$fifo" "${b1:-Terminate}" "${b2:-Wait}")
+if [ "$(qs -c tacit ipc call island notAnswering "$req" 2>/dev/null)" != "shown" ]; then
+	kill "$reader" 2>/dev/null
+	rm -f "$fifo" "$fifo.answer"
+	exec "$real" "${args[@]}"
+fi
+wait "$reader"
+cat "$fifo.answer"
+rm -f "$fifo" "$fifo.answer"

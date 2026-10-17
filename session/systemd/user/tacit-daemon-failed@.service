@@ -1,0 +1,8 @@
+[Unit]
+Description=Say that %i gave up
+# Pulled in by OnFailure= in the desktop's own units, never enabled. Without it a daemon that
+# exhausts its restart limit is silent for the rest of the session.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/tacit/bin/tacit-daemon-failed %i

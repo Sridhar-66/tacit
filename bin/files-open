@@ -1,0 +1,8 @@
+#!/bin/sh
+# files-open [folder]: Files (Pinax), the shell's own panel, at a folder or as it was. The menu entry and the default
+# handler for folders run it.
+TACIT_SHELL=${TACIT_SHELL:-$HOME/.config/quickshell/tacit}  # the shell's folder (the package sets TACIT_SHELL)
+if [ -n "${1:-}" ]; then
+	exec qs -p "$TACIT_SHELL" ipc call files at "$1"
+fi
+exec qs -p "$TACIT_SHELL" ipc call files open

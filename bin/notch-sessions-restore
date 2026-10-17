@@ -1,0 +1,18 @@
+#!/bin/bash
+# For the shell at startup: every Claude session the hooks have seen, one per line,
+#   <id>\t<state>\t<cwd>\t<addr>\t<since-epoch-seconds>
+# Sessions whose process is gone are dropped (the hook's SessionEnd may have missed a kill).
+set -u
+dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/notch-sessions
+[ -d "$dir" ] || exit 0
+for f in "$dir"/*.state; do
+	[ -f "$f" ] || continue
+	sid=$(basename "$f" .state)
+	IFS=$'\t' read -r state cwd addr < "$f"
+	# still alive? the terminal window must still exist
+	if [ -n "${addr:-}" ] && ! hyprctl clients -j 2>/dev/null | grep -q "\"address\": \"$addr\""; then
+		rm -f "$dir/$sid".*; continue
+	fi
+	printf '%s\t%s\t%s\t%s\t%s\n' "$sid" "$state" "$cwd" "${addr:-}" "$(stat -c %Y "$f")"
+done
+exit 0

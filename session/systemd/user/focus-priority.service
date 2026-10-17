@@ -1,0 +1,14 @@
+[Unit]
+Description=The app in front gets CPU and memory first (focus-priority)
+PartOf=tacit-session.target
+After=tacit-session.target
+OnFailure=tacit-daemon-failed@%n.service
+
+[Service]
+ExecStart=/usr/lib/tacit/bin/focus-priority
+Restart=on-failure
+RestartSec=3
+MemoryHigh=60M
+
+[Install]
+WantedBy=tacit-session.target

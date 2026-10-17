@@ -1,0 +1,12 @@
+#!/bin/sh
+# app-scope <id> <command...>
+#
+# Start an app in its own systemd scope under app-graphical.slice, the way GNOME and KDE
+# start apps. The kernel and systemd-oomd then see apps one by one: memory pressure is
+# taken from, or an app is stopped, instead of the whole desktop, and focus-priority can
+# favour the app in front. Without a user manager the app starts plainly.
+id=$(printf '%s' "${1##*/}" | tr -c 'A-Za-z0-9_.' '_' | cut -c1-48)
+shift
+[ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus" ] || exec "$@"
+exec systemd-run --user --scope --collect --quiet --slice=app-graphical.slice \
+    --unit="app-${id:-app}-$$" -- "$@"

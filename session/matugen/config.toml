@@ -1,0 +1,88 @@
+[config]
+version_check = false
+
+[templates.m3colors]
+input_path = '/usr/share/tacit/matugen/templates/colors.json'
+output_path = '~/.local/state/quickshell/user/generated/colors.json'
+
+[templates.hyprland]
+input_path = '/usr/share/tacit/matugen/templates/hyprland/colors.lua'
+output_path = '~/.config/hypr/hyprland/colors.lua'
+
+[templates.hyprlock]
+input_path = '/usr/share/tacit/matugen/templates/hyprland/hyprlock-colors.conf'
+output_path = '~/.config/hypr/hyprlock/colors.conf'
+
+[templates.fuzzel]
+input_path = '/usr/share/tacit/matugen/templates/fuzzel/fuzzel_theme.ini'
+output_path = '~/.config/fuzzel/fuzzel_theme.ini'
+
+[templates.gtk3]
+input_path = '/usr/share/tacit/matugen/templates/gtk-3.0/gtk.css'
+output_path = '~/.config/gtk-3.0/gtk.css'
+
+[templates.gtk4]
+input_path = '/usr/share/tacit/matugen/templates/gtk-4.0/gtk.css'
+output_path = '~/.config/gtk-4.0/gtk.css'
+
+[templates.kde_colors]
+input_path = '/usr/share/tacit/matugen/templates/kde/color.txt'
+output_path = '~/.local/state/quickshell/user/generated/color.txt'
+
+[templates.wallpaper]
+input_path = '/usr/share/tacit/matugen/templates/wallpaper.txt'
+output_path = '~/.local/state/quickshell/user/generated/wallpaper/path.txt'
+
+# Qt widget style. Kvantum draws the SHAPES; without this its theme carries its own
+# hard-coded palette and Qt apps would be the one thing on the desktop not following
+# the wallpaper.
+[templates.kvantum]
+input_path = '/usr/share/tacit/matugen/templates/kvantum/MaterialAdw.kvconfig'
+output_path = '~/.config/Kvantum/MaterialAdw/MaterialAdw.kvconfig'
+
+# Kvantum paints panels and frames from this SVG, not from the palette above: Colloid's own colours were
+# baked into it, so Qt apps stayed cyan after the palette changed. The same roles, generated.
+[templates.kvantum-svg]
+input_path = '/usr/share/tacit/matugen/templates/kvantum/MaterialAdw.svg'
+output_path = '~/.config/Kvantum/MaterialAdw/MaterialAdw.svg'
+# wlogout is the session menu shown when the shell is dead, so it cannot ask the
+# shell for colours; it reads the same generated palette everything else does.
+[templates.wlogout]
+input_path = '/usr/share/tacit/matugen/templates/wlogout/style.css'
+output_path = '~/.config/wlogout/style.css'
+
+# Tacit's cursor: repainted in the accent after every wallpaper change (~0.1 s, in the background).
+[templates.tacit_cursor]
+input_path = '/usr/share/tacit/matugen/templates/tacit-cursor.conf'
+output_path = '~/.local/state/quickshell/user/generated/tacit-cursor.conf'
+post_hook = 'setsid -f tacit-cursor-paint >/dev/null 2>&1 || true'
+
+# Zen Browser chrome. The profile's chrome/userChrome.css imports this file, so
+# the palette follows every wallpaper change without touching the profile.
+[templates.zen]
+input_path = '/usr/share/tacit/matugen/templates/zen/colors.css'
+output_path = '~/.local/state/quickshell/user/generated/zen/colors.css'
+
+# VS Code cannot read the shell's palette, so like Kvantum and wlogout it gets the
+# same generated colours as everything else. Output is a theme extension VS Code
+# picks up on launch; the user selects "Martida" once and it then follows the
+# wallpaper. Reload the window (or restart) to see a new palette.
+
+[templates.vscode]
+input_path = '/usr/share/tacit/matugen/templates/vscode/martida-color-theme.json'
+output_path = '~/.vscode-oss/extensions/martida-theme/themes/martida-color-theme.json'
+
+# Neovim follows the wallpaper like everything else. The hook recolours every
+# running nvim at once (each listens on a socket in $XDG_RUNTIME_DIR), so an open
+# editor changes with the wallpaper instead of on its next start.
+[templates.nvim]
+input_path = '/usr/share/tacit/matugen/templates/nvim/matugen.lua'
+output_path = '~/.config/nvim/colors/matugen.lua'
+post_hook = 'for s in "${XDG_RUNTIME_DIR:-/run/user/1000}"/nvim.*.0; do [ -S "$s" ] && nvim --server "$s" --remote-send "<Cmd>colorscheme matugen<CR>" >/dev/null 2>&1; done; true'
+
+# The code editor's syntax colours (and any KDE app offered "Martida"): the VS Code
+# martida role mapping as a KSyntaxHighlighting theme. The editor loads themes at start,
+# so a new wallpaper reaches its syntax colours the next time it opens.
+[templates.kde_syntax_martida]
+input_path = '/usr/share/tacit/matugen/templates/kde-syntax/martida.theme'
+output_path = '~/.local/share/org.kde.syntax-highlighting/themes/martida.theme'

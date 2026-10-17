@@ -1,0 +1,26 @@
+#!/bin/sh
+# Open one file in the code editor (code.qml): its git project first, then the file, at LINE
+# when given, or at the first line containing FIND. Used by the Claude app's edit rows and
+# changes panel.   code-file <path> [line] [find]
+#
+# The probe, the single-launch lock, the poll and the failure notice are tacit-app's, shared with
+# code-open and claude-hand.
+T_BIN=${TACIT_BIN:-$HOME/.local/bin}                          # Tacit's launchers (the package sets TACIT_BIN)
+f=$(realpath "$1") || exit 1
+line=${2:-0}
+if [ -n "${3:-}" ]; then
+	n=$(grep -nF -m1 -- "$3" "$f" 2>/dev/null | cut -d: -f1)
+	[ -n "$n" ] && line=$n
+fi
+dir=$(dirname "$f")
+top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || top=$dir
+T="$T_BIN/tacit-app"
+state=$(CODE_PROJECT="$top" "$T" ensure graphis) || exit 1
+if [ "$state" = up ]; then
+	cur=$("$T" call graphis root 2>/dev/null)
+	[ "$cur" != "$top" ] && "$T" call graphis open "$top"
+fi
+"$T" call graphis present      # a closed window only hides
+"$T" call graphis fileAt "${f#"$top"/}" "$line"
+"$T" focus graphis
+exit 0

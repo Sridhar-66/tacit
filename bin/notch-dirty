@@ -1,0 +1,26 @@
+#!/bin/bash
+# Uncommitted work, for the notch: for every git repo given, print
+#   <path>\t<changed files>\t<minutes since the OLDEST uncommitted change>
+# and nothing for clean repos or non-repos. "Oldest" is the point: work that has been sitting
+# uncommitted for an hour is the thing worth a glyph, not the file you saved a minute ago.
+set -u
+now=$(date +%s)
+seen=""
+for repo in "$@"; do
+	repo=${repo/#\~/$HOME}
+	[ -d "$repo" ] || continue
+	# the repo root, so a session in a subfolder and the configured root count once
+	repo=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) || continue
+	case "$seen" in *"|$repo|"*) continue ;; esac
+	seen="$seen|$repo|"
+	count=0; oldest=$now
+	while IFS= read -r -d '' entry; do
+		path=${entry:3}
+		count=$((count + 1))
+		mt=$(stat -c %Y -- "$repo/$path" 2>/dev/null) || mt=$now
+		[ "$mt" -lt "$oldest" ] && oldest=$mt
+	done < <(timeout 20 git -C "$repo" status --porcelain -z --untracked-files=normal 2>/dev/null)
+	[ "$count" -gt 0 ] || continue
+	printf '%s\t%d\t%d\n' "$repo" "$count" $(( (now - oldest) / 60 ))
+done
+exit 0

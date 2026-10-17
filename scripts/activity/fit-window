@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+# fit-window <height>: Activity's window to that height with its top edge where it is, so the tabs stay
+# under the pointer when a page changes length (a plain resize keeps the centre). It moves up only as far
+# as it must to stay on the screen.
+import json, subprocess, sys
+
+def hypr(*args):
+    r = subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=3)
+    return r.stdout
+
+h = int(sys.argv[1])
+c = next((c for c in json.loads(hypr("clients", "-j")) if c["class"] == "activity" and c["floating"]), None)
+if c is None:
+    sys.exit(0)
+ms = json.loads(hypr("monitors", "-j"))
+m = next((m for m in ms if m["id"] == c["monitor"]), ms[0])
+mh, my = m["height"] / m["scale"], m["y"]
+h = min(h, int(mh - 48))
+x, y = c["at"]
+top = max(my + 24, min(y, int(my + mh - h - 24)))
+a = c["address"]
+hypr("--batch", f'dispatch hl.dsp.window.resize({{ x = {c["size"][0]}, y = {h}, relative = false, window = "address:{a}" }}) ; '
+                f'dispatch hl.dsp.window.move({{ x = {x}, y = {top}, window = "address:{a}" }})')

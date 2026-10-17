@@ -1,0 +1,978 @@
+#!/home/abdul/.local/share/flow/venv/bin/python
+"""flowd: dictation for the whole desktop (Flow).
+
+Hold the key (the shell's `flowHold` shortcut), speak, release: the audio streams to Gemini 3.5
+Transcribe Live while you speak (fillers and self-corrections removed, lists formatted, your word
+list as its vocabulary), the text is final a few hundred ms after the key goes up, and it is typed
+where your cursor is. If the stream fails, Gemini 2.5 Flash hears the recording instead.
+
+Socket $XDG_RUNTIME_DIR/flow.sock, JSON lines:
+  -> {"op":"start"} {"op":"stop"} {"op":"cancel"} {"op":"status"} {"op":"watch"}
+     {"op":"file","path":WAV,"dry":true}   feed a 16 kHz mono WAV instead of the mic (checks)
+     {"op":"insert","text":..}   type a past dictation where the cursor is (the palette's history)
+  <- {"ev":"state","state":"idle|listening|writing|error","text":..}  (+ build/proto on watch)
+     {"ev":"level","v":0..1}   {"ev":"done","text":..,"raw":..,"ms":{..}}
+Files: ~/.config/flow/config.json, ~/.config/flow/words.txt (one term per line),
+       ~/.local/state/flow/history.jsonl (the last 300 dictations, local only).
+Google login: the gcloud user token, renewed in the background (no key files on disk).
+"""
+import base64
+import fcntl
+import io
+import json
+import math
+import os
+import queue
+import re
+import shutil
+import signal
+import socket
+import struct
+import subprocess
+import tempfile
+import threading
+import time
+import wave
+import http.client
+
+from google.api_core.client_options import ClientOptions
+from google.cloud import speech_v2 as sp
+from google.oauth2.credentials import Credentials
+from websockets.sync.client import connect as ws_connect
+
+HOME = os.path.expanduser("~")
+RUN = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+SOCK = os.path.join(RUN, "flow.sock")
+CONF_DIR = os.path.join(HOME, ".config", "flow")
+CONF_FILE = os.path.join(CONF_DIR, "config.json")
+LOCK_FILE = os.path.join(RUN, "flowd.lock")
+# The socket protocol. Bump it when an op or an event changes shape: an upgraded shell talking to
+# the flowd still running from before the upgrade was otherwise undetectable from either side.
+PROTO = 1
+STATE_DIR = os.path.join(HOME, ".local", "state", "flow")
+GCLOUD = os.path.join(HOME, "google-cloud-sdk", "bin", "gcloud")
+if not os.path.exists(GCLOUD):
+    GCLOUD = shutil.which("gcloud") or GCLOUD
+CLIPHIST = shutil.which("cliphist")
+TERMINALS = {"foot", "footclient", "kitty", "Alacritty", "com.mitchellh.ghostty", "org.wezfurlong.wezterm"}
+# AI prompts in a terminal that take Ctrl+J as a line break without sending (their documented key)
+CTRL_J_NEWLINE = {"claude", "opencode", "codex"}
+SHELL_BUILTINS = {"cd", "exit", "source", "export", "set", "alias", "history"}
+DEFAULTS = {
+    "project": "martida-flow",
+    "region": "eu",
+    "languages": ["en-US"],
+    # live:   streamed to Gemini 3.5 Transcribe Live while you speak (23.0% word errors and 11/11
+    #         names on the user's reading of the benchmark script; final ~0.3 s after a short
+    #         sentence, ~0.65 s after 37 s); 2.5 Flash hears the recording if the stream fails;
+    # gemini: Gemini 2.5 Flash hears the recording after release (21.6%, 11/11, ~0.85-1.7 s);
+    # chirp:  Chirp 3 streams while you speak and Gemini cleans up (40.5%, 5/11, ~1.2 s).
+    "engine": "live",
+    "live_model": "gemini-3.5-transcribe-live-preview",
+    "hearing_model": "gemini-2.5-flash",
+    "model": "gemini-3.5-flash-lite",   # the chirp engine's cleanup
+    "cleanup": True,              # chirp engine: False = Chirp's text as it comes
+    "paste_over": 250,            # longer than this (or several lines): paste instead of typing
+}
+SAMPLE_RATE = 16000
+CHUNK = 1600                      # 50 ms of s16 mono
+# The internal mics come in about 20 dB quiet (speech near -43 dBFS); +18 dB with a soft limit
+# lowered Chirp's word errors from 49% to 35% on the user's own reading of the benchmark script.
+GAIN = 10 ** (18 / 20)
+QUIET = 250                       # a 50 ms chunk below this RMS (after the gain) is room, not voice
+LIVE_URL = "wss://aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
+# A dictation stops at MAX_SECONDS: past the pill's own hold there is no indicator left, so a
+# hands-free session forgotten about would keep the mic open and grow with nothing on screen.
+MAX_SECONDS = 120
+SCRATCH_WINDOW = 30              # "scratch that" only undoes an insert this recent
+INSERT_TIMEOUT = 30              # wtype typing or pasting; nothing on the insert path may block
+CLIP_TIMEOUT = 5                 # wl-copy / wl-paste / cliphist
+GEMINI_TIMEOUT = 90              # the fallback uploads the recording: ~2.6 MB of base64 a minute
+# One insert at a time: a palette insert during a paste put the wrong text back on the clipboard.
+INSERT = threading.Lock()
+
+
+def load_conf():
+    conf = dict(DEFAULTS)
+    try:
+        with open(CONF_FILE) as fh:
+            conf.update(json.load(fh))
+    except (OSError, ValueError):
+        pass
+    return conf
+
+
+def build():
+    """This file's own mtime. A hand-edited daemon has no build system, and a version constant
+    somebody has to remember to raise is the thing that goes stale."""
+    try:
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(__file__)))
+    except OSError:
+        return "unknown"
+
+
+def load_words():
+    try:
+        with open(os.path.join(CONF_DIR, "words.txt")) as fh:
+            return [l.strip() for l in fh if l.strip() and not l.startswith("#")]
+    except OSError:
+        return []
+
+
+# ── the Google login: a gcloud user token, renewed before it runs out ──────
+class Token:
+    def __init__(self):
+        self.value, self.at = "", 0.0
+        self.error, self.failed_at = "", 0.0
+        self.lock = threading.Lock()
+        threading.Thread(target=self._keep, daemon=True).start()
+
+    def _fetch(self):
+        try:
+            r = subprocess.run([GCLOUD, "auth", "print-access-token"], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as e:
+            with self.lock:
+                self.error, self.failed_at = f"{type(e).__name__}: {e}"[:160], time.time()
+            return
+        with self.lock:
+            if r.returncode == 0 and r.stdout.strip():
+                self.value, self.at, self.error = r.stdout.strip(), time.time(), ""
+            else:
+                # a failed refresh was invisible: the old value stayed in place and was handed out
+                self.error, self.failed_at = (r.stderr or "").strip()[:160] or "no token", time.time()
+
+    def _keep(self):
+        while True:
+            try:
+                self._fetch()
+            except Exception:
+                pass
+            time.sleep(45 * 60)
+
+    # an expired token is not a credential: handing the stale one out turned a dead gcloud login
+    # into a 1008 policy violation from the stream instead of "Flow needs you to sign in again"
+    def fresh(self):
+        with self.lock:
+            return self.value if self.value and time.time() - self.at < 55 * 60 else ""
+
+    def get(self):
+        tok = self.fresh()
+        if tok:
+            return tok
+        with self.lock:
+            # a broken login cost a 30 s gcloud subprocess on the hot path of every dictation
+            if self.error and time.time() - self.failed_at < 60:
+                return ""
+        self._fetch()
+        return self.fresh()
+
+
+# ── the socket: commands in, events out to every watcher ───────────────────
+class Hub:
+    def __init__(self):
+        self.watchers, self.lock = [], threading.Lock()
+
+    def add(self, conn):
+        with self.lock:
+            self.watchers.append(conn)
+
+    def drop(self, conn):
+        with self.lock:
+            if conn in self.watchers:
+                self.watchers.remove(conn)
+
+    def emit(self, obj):
+        line = (json.dumps(obj) + "\n").encode()
+        with self.lock:
+            for c in list(self.watchers):
+                try:
+                    c.sendall(line)
+                except OSError:
+                    self.watchers.remove(c)
+
+
+class Flow:
+    def __init__(self):
+        self.hub = Hub()
+        self.token = Token()
+        self.state = "idle"
+        self.session = None
+        self.last_inserted, self.last_window, self.last_at = "", "", 0.0
+        self.lock = threading.Lock()
+        self._client, self._client_tok = None, ""
+        self.gemini = None
+        os.makedirs(STATE_DIR, exist_ok=True)
+
+    # the Speech client, rebuilt when the token changes; the channel stays warm between uses
+    def client(self, conf):
+        tok = self.token.get()
+        if self._client is None or tok != self._client_tok:
+            self._client = sp.SpeechClient(
+                credentials=Credentials(tok),
+                client_options=ClientOptions(api_endpoint=f"{conf['region']}-speech.googleapis.com",
+                                             quota_project_id=conf["project"]))
+            self._client_tok = tok
+        return self._client
+
+    def set_state(self, state, text=""):
+        self.state = state
+        self.hub.emit({"ev": "state", "state": state, "text": text})
+
+    # ── a dictation ─────────────────────────────────────────────────────
+    def start(self, wav=None, dry=False):
+        with self.lock:
+            if self.session:
+                # answered, not dropped: the shell's "starting" flag only clears on a state event,
+                # so a silent return left its key dead until the shell restarted
+                self.set_state(self.state)
+                return
+            conf = load_conf()
+            self.session = s = {"conf": conf, "q": queue.Queue(), "stop": threading.Event(), "cancel": False,
+                                "dry": dry, "wav": wav, "window": active_window(with_program=True), "t0": time.time(),
+                                "finals": [], "partial": "", "rec": None}
+        if self.token.error and not self.token.fresh():
+            self._finish(s, note="Flow needs you to sign in again.")
+            return
+        # "listening" is said when the first audio arrives (_chunk), not before: the mic takes a
+        # moment to open, and words spoken into a pill that is not yet listening were lost
+        # the cleanup's connection opens while you speak, so it is warm when you let go
+        threading.Thread(target=self._warm, daemon=True).start()
+        if conf["engine"] == "live":
+            threading.Thread(target=self._record, args=(s,), daemon=True).start()
+            threading.Thread(target=self._live, args=(s,), daemon=True).start()
+        elif conf["engine"] == "gemini":
+            s["enc"] = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", "-",
+                                         "-c:a", "libopus", "-b:a", "32k", "-application", "voip", "-f", "ogg", "-"],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            s["ogg"] = bytearray()
+            threading.Thread(target=lambda: s["ogg"].extend(s["enc"].stdout.read()), daemon=True).start()
+            threading.Thread(target=self._record_then_hear, args=(s,), daemon=True).start()
+        else:
+            threading.Thread(target=self._record, args=(s,), daemon=True).start()
+            threading.Thread(target=self._recognize, args=(s,), daemon=True).start()
+
+    def stop(self):
+        s = self.session
+        if s:
+            s["t_stop"] = time.time()
+            s["stop"].set()
+
+    def cancel(self):
+        s = self.session
+        if s:
+            s["cancel"] = True
+            s["stop"].set()
+
+    def _record(self, s):
+        """Mic (or a WAV for checks) -> 50 ms chunks into the queue, with the voice level."""
+        try:
+            if s["wav"]:
+                w = wave.open(s["wav"])
+                data = w.readframes(w.getnframes())
+                for i in range(0, len(data), CHUNK):
+                    if s["stop"].is_set() and not s["dry"]:
+                        break
+                    self._chunk(s, data[i:i + CHUNK])
+                    time.sleep(CHUNK / (SAMPLE_RATE * 2))
+            else:
+                # parec's own reason for failing, kept on a file and not a pipe: a stderr pipe
+                # nobody drains could fill and stall the recording
+                mic_err = tempfile.TemporaryFile()
+                try:
+                    rec = subprocess.Popen(["parec", "--format=s16le", f"--rate={SAMPLE_RATE}", "--channels=1",
+                                            "--latency-msec=30", "--raw"], stdout=subprocess.PIPE, stderr=mic_err)
+                except OSError as e:
+                    print(f"flowd: parec: {e}", flush=True)
+                    s["mic"] = "Can't: no microphone"
+                    return
+                s["rec"] = rec
+                cap = time.time() + MAX_SECONDS
+                while not s["stop"].is_set():
+                    b = rec.stdout.read(CHUNK)
+                    if not b:
+                        break
+                    self._chunk(s, b)
+                    if time.time() > cap:
+                        s["capped"] = True
+                        break
+                # the last word often ends as the key goes down: keep listening until 250 ms of
+                # quiet, at most 600 ms
+                if not s["cancel"] and not s.get("capped"):
+                    quiet = 0
+                    for _ in range(12):
+                        b = rec.stdout.read(CHUNK)
+                        if not b:
+                            break
+                        quiet = quiet + 1 if self._chunk(s, b) < QUIET else 0
+                        if quiet >= 5:
+                            break
+                rec.terminate()
+                # parec is waited for before its pipe is drained: reading to EOF while it was
+                # still alive (a source that went away, a blocked PipeWire path) hung here for
+                # good, and the None sentinel below was never queued
+                try:
+                    rec.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    rec.kill()
+                    rec.wait(timeout=2)
+                # what the mic still held after the key went up, through the gain and into the
+                # recording like every other chunk
+                tail = rec.stdout.read()
+                if tail:
+                    self._chunk(s, tail)
+                if not s.get("live") and not s["cancel"]:
+                    # parec died without ever handing over audio: say that, not "didn't catch it"
+                    mic_err.seek(0)
+                    err = mic_err.read().decode(errors="ignore").strip()
+                    print(f"flowd: parec: {err[:200] or f'exit {rec.returncode}'}", flush=True)
+                    s["mic"] = "Can't: no microphone"
+                mic_err.close()
+        finally:
+            s["q"].put(None)
+
+    def _chunk(self, s, b):
+        if not s["wav"]:
+            b = boost(b)
+        if s.get("enc"):
+            try:
+                s["enc"].stdin.write(b)
+            except OSError:
+                pass
+        else:
+            s["q"].put(b)
+        s.setdefault("pcm", bytearray()).extend(b)
+        if not s.get("live"):
+            s["live"] = True
+            self.set_state("listening")
+        n = len(b) // 2
+        rms = 0.0
+        if n:
+            rms = math.sqrt(sum(v * v for v in struct.unpack(f"<{n}h", b[:n * 2])) / n)
+            self.hub.emit({"ev": "level", "v": round(min(1.0, math.sqrt(rms / 6000)), 3)})
+        return rms
+
+    def _record_then_hear(self, s):
+        self._record(s)
+        enc = s["enc"]
+        try:
+            enc.stdin.close()
+        except OSError:
+            pass
+        enc.wait(timeout=5)
+        t_end = time.time()
+        time.sleep(0.02)                 # the reader thread takes the last bytes
+        if s["cancel"]:
+            self._finish(s)
+            return
+        pcm = bytes(s.get("pcm", b""))
+        save_last(pcm)
+        if not speech_in(pcm):
+            self._finish(s, note=s.get("mic") or "Didn't catch anything.")
+            return
+        self.set_state("writing")
+        try:
+            text = self.hear(s["conf"], bytes(s["ogg"]), s["window"])
+        except Exception as e:
+            self._finish(s, error=f"{type(e).__name__}: {str(e)[:160]}")
+            return
+        heard = time.time()
+        text, enter = spoken_commands(text)
+        if text.lower().strip(" .!") == "scratch that":
+            self._finish(s, scratch=True, raw=text, ms={"heard": ms(t_end, heard)})
+            return
+        if not text.strip():
+            self._finish(s, note="Didn't catch anything.")
+            return
+        self._finish(s, text=text, raw="", enter=enter, ms={"heard": ms(t_end, heard), "total": ms(t_end, time.time())})
+
+    def _live(self, s):
+        """Each 50 ms of audio goes to the stream as it arrives; at the end the transcriber only has
+        the last moment left. The whole recording is kept for the fallback."""
+        conf = s["conf"]
+        ws = self._live_open(conf)
+        got, done = [], threading.Event()
+
+        def read():
+            try:
+                for raw in ws:
+                    sc = json.loads(raw).get("serverContent", {})
+                    if "inputTranscription" in sc:
+                        got.append(sc["inputTranscription"].get("text", ""))
+                    if s.get("ended") and (sc.get("generationComplete") or sc.get("turnComplete")):
+                        s["complete"] = True
+                        break
+            except Exception as e:
+                print(f"flowd: stream read: {e}", flush=True)
+            finally:
+                done.set()
+
+        if ws:
+            threading.Thread(target=read, daemon=True).start()
+        while True:
+            b = s["q"].get()
+            if b is None:
+                break
+            if ws:
+                try:
+                    ws.send(json.dumps({"realtimeInput": {"audio": {"data": base64.b64encode(b).decode(),
+                                                                    "mimeType": f"audio/pcm;rate={SAMPLE_RATE}"}}}))
+                except Exception as e:
+                    print(f"flowd: stream send: {e}", flush=True)
+                    ws = None
+        t_end = time.time()
+        pcm = bytes(s.get("pcm", b""))
+        if s["cancel"] or not speech_in(pcm):
+            if ws:
+                threading.Thread(target=ws.close, daemon=True).start()
+            if not s["cancel"]:
+                save_last(pcm)
+            self._finish(s, note="" if s["cancel"] else s.get("mic") or "Didn't catch anything.")
+            return
+        self.set_state("writing")
+        text = None
+        if ws:
+            try:
+                s["ended"] = True
+                ws.send(json.dumps({"realtimeInput": {"activityEnd": {}}}))
+                done.wait(8)
+                # only a finished stream has the whole sentence: accepting whatever chunks had
+                # arrived typed half a line as if it were the text, and skipped the fallback
+                if s.get("complete"):
+                    text = " ".join(t.strip() for t in got if t.strip())
+            except Exception as e:
+                print(f"flowd: stream end: {e}", flush=True)
+            threading.Thread(target=ws.close, daemon=True).start()
+        save_last(pcm)
+        if text is None:
+            print("flowd: stream did not finish, 2.5 Flash hears the recording", flush=True)
+            try:
+                text = self.hear(conf, wav_bytes(pcm), s["window"], "audio/wav")
+            except Exception as e:
+                self._finish(s, error=f"{type(e).__name__}: {str(e)[:160]}")
+                return
+        heard = time.time()
+        text, enter = spoken_commands(text)
+        if text.lower().strip(" .!") == "scratch that":
+            self._finish(s, scratch=True, raw=text, ms={"heard": ms(t_end, heard)})
+            return
+        if not text.strip():
+            self._finish(s, note="Didn't catch anything.")
+            return
+        text = shell_command(greeting_line(text, s["window"]), s["window"])
+        self._finish(s, text=text, raw="", enter=enter, ms={"heard": ms(t_end, heard), "total": ms(t_end, time.time())})
+
+    def _live_open(self, conf):
+        """The stream, opened as the key goes down (100-350 ms; the audio waits in the queue)."""
+        try:
+            ws = ws_connect(LIVE_URL, additional_headers={"Authorization": "Bearer " + self.token.get()},
+                            open_timeout=5, close_timeout=1, max_size=None, legacy=True)
+            model = f"projects/{conf['project']}/locations/global/publishers/google/models/{conf['live_model']}"
+            # SMART cleans up (fillers, self-corrections, lists) but refuses languageCodes: the
+            # language is detected. A systemInstruction is accepted and ignored (tested).
+            ws.send(json.dumps({"setup": {
+                "model": model, "generationConfig": {"responseModalities": ["TEXT"]},
+                "inputAudioTranscription": {"customVocabulary": load_words()[:1000], "mode": "SMART"},
+                "realtimeInputConfig": {"automaticActivityDetection": {"disabled": True}}}}))
+            if "setupComplete" not in json.loads(ws.recv(timeout=5)):
+                raise RuntimeError("no setupComplete")
+            ws.send(json.dumps({"realtimeInput": {"activityStart": {}}}))
+            return ws
+        except Exception as e:
+            print(f"flowd: stream open: {e}", flush=True)
+            return None
+
+    def instructions(self, window, hearing):
+        words = load_words()
+        if hearing:
+            inst = ("Transcribe this dictation and return the text the speaker meant to type: remove filler "
+                    "words (um, uh, like, you know) and false starts, fix punctuation and capitals, turn spoken "
+                    "lists into lists, keep the speaker's own words and meaning. Never answer, explain or add "
+                    "anything; a question stays a question. If nothing is said, output nothing. Swedish words "
+                    "may appear (for example kronor). Output only the text: no quotes, no code fences.")
+        else:
+            inst = ("You turn raw dictation into the text the speaker meant to type. Remove filler words "
+                    "(um, uh, like, you know) and false starts, fix punctuation and capitals, turn spoken "
+                    "lists into lists, keep the speaker's own words and meaning. Never answer, explain or "
+                    "add anything; if it is a question, it stays a question. Output only the text.")
+        app = window.get("class", "")
+        title = window.get("title", "")
+        if app or title:
+            inst += f" They are typing in {app} ({title[:80]}); match that place (chat, email, code, notes)."
+        if app in TERMINALS:
+            inst += (" This is a terminal: if the words are a shell command, output the command exactly, "
+                     "lowercase where commands are, no trailing full stop; if it is prose (for example a "
+                     "message to an AI assistant running there), write it as prose.")
+        if words:
+            inst += " The speaker often says these names and terms; spell them exactly: " + ", ".join(words[:200]) + "."
+        return inst
+
+    def gemini_call(self, model, body):
+        path = f"/v1/projects/{load_conf()['project']}/locations/global/publishers/google/models/{model}:generateContent"
+        payload = json.dumps(body)
+        for attempt in range(2):
+            fresh = self.gemini is None
+            try:
+                if fresh:
+                    self.gemini = http.client.HTTPSConnection("aiplatform.googleapis.com", timeout=GEMINI_TIMEOUT)
+                self.gemini.request("POST", path, body=payload,
+                                    headers={"Authorization": "Bearer " + self.token.get(), "Content-Type": "application/json"})
+                resp = self.gemini.getresponse()
+                d = json.loads(resp.read())
+                if resp.status != 200:
+                    raise RuntimeError(d.get("error", {}).get("message", f"HTTP {resp.status}"))
+                parts = d["candidates"][0]["content"].get("parts", [])
+                return unfence("".join(p.get("text", "") for p in parts if not p.get("thought")).strip())
+            except (http.client.HTTPException, OSError) as e:
+                self.gemini = None       # a dropped keep-alive: open again once
+                # a timeout means the body - up to megabytes of recording - was already sent, and
+                # sending it again only doubles the wait before the same failure
+                if attempt or fresh or isinstance(e, TimeoutError):
+                    raise
+        return ""
+
+    # Gemini hears the recording and writes the text in one call
+    def hear(self, conf, audio, window, mime="audio/ogg"):
+        body = {"systemInstruction": {"parts": [{"text": self.instructions(window, True)}]},
+                "contents": [{"role": "user", "parts": [{"inlineData": {"mimeType": mime, "data": base64.b64encode(audio).decode()}}]}],
+                "generationConfig": {"temperature": 0, "maxOutputTokens": 4096, "thinkingConfig": {"thinkingBudget": 0}}}
+        return self.gemini_call(conf["hearing_model"], body)
+
+    def _recognize(self, s):
+        conf = s["conf"]
+        t_end = None
+        try:
+            cfg = sp.StreamingRecognitionConfig(
+                config=sp.RecognitionConfig(
+                    explicit_decoding_config=sp.ExplicitDecodingConfig(
+                        encoding=sp.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
+                        sample_rate_hertz=SAMPLE_RATE, audio_channel_count=1),
+                    language_codes=conf["languages"], model="chirp_3",
+                    features=sp.RecognitionFeatures(enable_automatic_punctuation=True)),
+                streaming_features=sp.StreamingRecognitionFeatures(interim_results=True))
+            rec = f"projects/{conf['project']}/locations/{conf['region']}/recognizers/_"
+
+            def requests():
+                nonlocal t_end
+                yield sp.StreamingRecognizeRequest(recognizer=rec, streaming_config=cfg)
+                while True:
+                    b = s["q"].get()
+                    if b is None:
+                        t_end = time.time()
+                        return
+                    yield sp.StreamingRecognizeRequest(audio=b)
+
+            for resp in self.client(conf).streaming_recognize(requests=requests()):
+                for r in resp.results:
+                    if not r.alternatives:
+                        continue
+                    if r.is_final:
+                        s["finals"].append(r.alternatives[0].transcript.strip())
+                        s["partial"] = ""
+                    else:
+                        s["partial"] = r.alternatives[0].transcript
+        except Exception as e:
+            self._finish(s, error=f"{type(e).__name__}: {str(e)[:160]}")
+            return
+        heard = time.time()
+        if s["cancel"]:
+            self._finish(s)
+            return
+        save_last(s.get("pcm"))
+        # a phrase still being worked on when the stream closed is not dropped
+        tail = s["partial"].strip()
+        if tail and not " ".join(s["finals"]).rstrip(" .").endswith(tail.rstrip(" .")):
+            s["finals"].append(tail)
+        raw = " ".join(f for f in s["finals"] if f).strip()
+        if not raw:
+            self._finish(s, note=s.get("mic") or "Didn't catch anything.")
+            return
+        self.set_state("writing")
+        text, enter = spoken_commands(raw)
+        app = s["window"].get("class", "")
+        if text.lower().strip(" .!") == "scratch that":
+            self._finish(s, scratch=True, raw=raw, ms={"heard": ms(t_end, heard)})
+            return
+        t_clean = time.time()
+        if conf["cleanup"]:
+            try:
+                text = self.clean(conf, text, s["window"])
+            except Exception as e:
+                self.hub.emit({"ev": "note", "text": f"cleanup skipped: {str(e)[:80]}"})
+        cleaned = time.time()
+        self._finish(s, text=text, raw=raw, enter=enter,
+                     ms={"heard": ms(t_end, heard), "clean": ms(t_clean, cleaned), "total": ms(t_end, time.time())})
+
+    def _warm(self):
+        try:
+            if self.gemini is None:
+                self.gemini = http.client.HTTPSConnection("aiplatform.googleapis.com", timeout=GEMINI_TIMEOUT)
+            if self.gemini.sock is None:
+                self.gemini.connect()
+        except OSError:
+            self.gemini = None
+
+    # ── the chirp engine's cleanup: the text the speaker meant to type ─────
+    def clean(self, conf, text, window):
+        body = {"systemInstruction": {"parts": [{"text": self.instructions(window, False)}]},
+                "contents": [{"role": "user", "parts": [{"text": text}]}],
+                "generationConfig": {"temperature": 0, "maxOutputTokens": 2048, "thinkingConfig": {"thinkingBudget": 0}}}
+        return self.gemini_call(conf["model"], body) or text
+
+    def insert_later(self, text):
+        """A past dictation from the palette: typed once the palette has closed and the window
+        under it has the keyboard again, with the same care for terminals as a live one."""
+        time.sleep(0.25)
+        with INSERT:
+            w = active_window(with_program=True)
+            insert(text, w.get("class", ""), load_conf()["paste_over"], w.get("program", ""))
+            self.last_inserted, self.last_window, self.last_at = text, w.get("address", ""), time.time()
+
+    def scratch(self):
+        """"Scratch that" un-types the last dictation - but only in the window it went into, and
+        only while it is still recent. It used to send that many backspaces into whatever had
+        focus, eating text the user had typed by hand or text in another window."""
+        w = active_window()
+        if (not self.last_inserted or w.get("address", "") != self.last_window
+                or time.time() - self.last_at > SCRATCH_WINDOW):
+            self.last_inserted = ""
+            self.hub.emit({"ev": "note", "text": "Can't: nothing to scratch here"})
+            return
+        subprocess.run(["wtype"] + ["-k", "BackSpace"] * len(self.last_inserted), timeout=INSERT_TIMEOUT)
+        self.last_inserted = ""
+
+    def _finish(self, s, text="", raw="", enter=False, scratch=False, error="", note="", ms=None):
+        """Every way out of a dictation ends at "idle". The insert work used to run after the
+        session was cleared with nothing catching it, so one exception left the state at "writing"
+        for good: no pill, the flow submap still entered, and the key refusing to start again."""
+        with self.lock:
+            self.session = None
+        try:
+            if error:
+                self.set_state("error", error)
+                time.sleep(0.1)
+                return
+            if note:
+                self.hub.emit({"ev": "note", "text": note})
+            elif s.get("capped"):
+                self.hub.emit({"ev": "note", "text": "Two minutes is as long as Flow listens."})
+            if s["cancel"] or (not text and not scratch):
+                return
+            if not s["dry"]:
+                with INSERT:
+                    if scratch:
+                        self.scratch()
+                    else:
+                        # where the cursor is NOW: the focus can move while it is being heard, and
+                        # a paste sent with the old window's rules reached nothing at all
+                        win = active_window(with_program=True) or s["window"]
+                        if win.get("address", "") != s["window"].get("address", ""):
+                            self.hub.emit({"ev": "note", "text": f"Wrote it in {win.get('class') or 'the window in front'}."})
+                        insert(text, win.get("class", ""), s["conf"]["paste_over"], win.get("program", ""))
+                        if enter:
+                            subprocess.run(["wtype", "-k", "Return"], timeout=INSERT_TIMEOUT)
+                        self.last_inserted, self.last_window, self.last_at = text, win.get("address", ""), time.time()
+                        if ms is not None and s.get("t_stop"):
+                            ms["key"] = round((time.time() - s["t_stop"]) * 1000)   # key up -> the text is in
+            if text:
+                self.hub.emit({"ev": "done", "text": text, "raw": raw, "ms": ms or {}, "dry": s["dry"]})
+                if not s["dry"]:
+                    record(text, raw, s["window"], ms)
+        except Exception as e:
+            self.set_state("error", f"{type(e).__name__}: {str(e)[:160]}")
+            time.sleep(0.1)
+        finally:
+            self.set_state("idle")
+
+
+def ms(a, b):
+    return round((b - a) * 1000) if a and b else None
+
+
+def unfence(t):
+    """Gemini sometimes wraps the text in ``` fences (in a terminal it thinks of code)."""
+    m = re.fullmatch(r"```[\w-]*\n?(.*?)\n?```", t.strip(), re.S)
+    return m.group(1).strip() if m else t
+
+
+def speech_in(pcm):
+    """Anything said at all: some 100 ms window clearly above the room (after the boost)."""
+    step = SAMPLE_RATE // 10 * 2
+    for i in range(0, len(pcm) - step, step):
+        n = step // 2
+        v = struct.unpack(f"<{n}h", pcm[i:i + step])
+        if math.sqrt(sum(x * x for x in v) / n) > 900:
+            return True
+    return False
+
+
+def boost(b):
+    n = len(b) // 2
+    v = struct.unpack(f"<{n}h", b[:n * 2])
+    return struct.pack(f"<{n}h", *(int(32767 * math.tanh(x * GAIN / 32767)) for x in v))
+
+
+def wav_bytes(pcm):
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SAMPLE_RATE)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
+def save_last(pcm):
+    """The last dictation as a WAV in $XDG_RUNTIME_DIR (tmpfs, gone at logout), overwritten each
+    time. Created 0600: the chmod came after the file did, so it existed readable first."""
+    if not pcm:
+        return
+    try:
+        path = os.path.join(RUN, "flow-last.wav")
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as fh:
+            with wave.open(fh, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(SAMPLE_RATE)
+                w.writeframes(bytes(pcm))
+    except OSError:
+        pass
+
+
+def spoken_commands(raw):
+    """A trailing "press enter" / "send it" ends with Enter."""
+    m = re.search(r"[\s,.]*\b(press enter|send it)[.!]?\s*$", raw, re.I)
+    if m:
+        return raw[:m.start()].strip(), True
+    return raw, False
+
+
+def active_window(with_program=False):
+    try:
+        w = json.loads(subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, timeout=2).stdout or "{}")
+    except (ValueError, subprocess.SubprocessError):
+        return {}
+    if with_program and w.get("class") in TERMINALS and w.get("pid"):
+        w["program"] = terminal_program(w["pid"])
+    return w
+
+
+def terminal_program(pid):
+    """What the terminal's shell runs in the foreground (claude, nvim), as claude-context finds it."""
+    def children(p):
+        r = subprocess.run(["pgrep", "-P", str(p)], capture_output=True, text=True)
+        return r.stdout.split()
+    shell = children(pid)[:1]
+    fg = children(shell[0])[-1:] if shell else []
+    try:
+        return open(f"/proc/{fg[0]}/comm").read().strip() if fg else ""
+    except OSError:
+        return ""
+
+
+GREETING = re.compile(r"^((?i:hi|hello|hey|dear|good (?:morning|afternoon|evening))(?: [A-Z][\w'-]*){0,2}),\s+(\S)")
+MAIL = re.compile(r"gmail|outlook|thunderbird|proton ?mail|\bmail\b", re.I)
+
+
+def greeting_line(text, window):
+    """A greeting on its own line, as in a letter, when the text has paragraphs or goes into mail;
+    "Hi, can you check this?" on its own stays one line."""
+    if "\n\n" not in text and not MAIL.search(window.get("title", "") + " " + window.get("class", "")):
+        return text
+    return GREETING.sub(lambda m: m.group(1) + ",\n\n" + m.group(2).upper(), text, count=1)
+
+
+def shell_command(text, window):
+    """At a shell prompt (a terminal running nothing) a one-line dictation that starts with a
+    command, "Git status.", is typed as the command: first word lowercase, no full stop."""
+    if window.get("class") not in TERMINALS or window.get("program") or "\n" in text:
+        return text
+    first = text.split(" ", 1)[0]
+    word = first.rstrip(".,!?").lower()
+    if word not in SHELL_BUILTINS and not shutil.which(word):
+        return text
+    return (first.lower() + text[len(first):]).rstrip(".")
+
+
+def wtype_lines(text):
+    """One wtype call for several lines, each break as Ctrl+J. A leading "-" (a bullet) would be read
+    as an option, so it goes as the minus key."""
+    args = ["wtype"]
+    for i, line in enumerate(text.split("\n")):
+        if i:
+            args += ["-M", "ctrl", "-k", "j", "-m", "ctrl"]
+        while line.startswith("-"):
+            args += ["-k", "minus"]
+            line = line[1:]
+        if line:
+            args.append(line)
+    return args
+
+
+def insert(text, app, paste_over, program=""):
+    """Short text is typed; long or multi-line text is pasted (a terminal takes a paste without
+    running each line), and the clipboard put back.
+
+    The paste waits until the clipboard really holds the text: wl-copy takes the clipboard a
+    moment after it returns, and a paste key sent before that pasted the old clipboard or nothing.
+    The old clipboard comes back on every way out, including a failure, unless somebody copied
+    something else meanwhile."""
+    if app in TERMINALS:
+        # A terminal is typed into, never pasted: foot ignored the synthetic Ctrl+Shift+V, so long
+        # dictations reached nothing. A typed newline is Enter, which would send a prompt halfway
+        # through: Claude Code, OpenCode and Codex get Ctrl+J (a line break there), a shell gets
+        # spaces (Ctrl+J would run the line).
+        if program in CTRL_J_NEWLINE and "\n" in text:
+            subprocess.run(wtype_lines(text), timeout=INSERT_TIMEOUT)
+        else:
+            subprocess.run(["wtype", "--", re.sub(r"\s*\n\s*", " ", text)], timeout=INSERT_TIMEOUT)
+        return
+    if len(text) <= (paste_over or 0) and "\n" not in text:
+        subprocess.run(["wtype", "--", text], timeout=INSERT_TIMEOUT)
+        return
+    types = subprocess.run(["wl-paste", "--list-types"], capture_output=True, text=True, timeout=CLIP_TIMEOUT)
+    offers = types.stdout.split() if types.returncode == 0 else []
+    if offers and not any(t.startswith("text/") for t in offers):
+        # an image on the clipboard cannot be put back afterwards, so it is not taken at all
+        subprocess.run(["wtype", "--", text], timeout=INSERT_TIMEOUT)
+        return
+    saved = subprocess.run(["wl-paste", "--no-newline", "--type", "text/plain"], capture_output=True, timeout=CLIP_TIMEOUT)
+    try:
+        subprocess.run(["wl-copy"], input=text.encode(), timeout=CLIP_TIMEOUT)
+        for _ in range(50):                      # up to a second
+            now = subprocess.run(["wl-paste", "--no-newline", "--type", "text/plain"], capture_output=True, timeout=CLIP_TIMEOUT)
+            if now.returncode == 0 and now.stdout.decode(errors="ignore") == text:
+                break
+            time.sleep(0.02)
+        subprocess.run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], timeout=INSERT_TIMEOUT)
+        time.sleep(1.2)                      # the app asks for the text when it handles the key
+    finally:
+        unclip(saved, text)
+
+
+def unclip(saved, text):
+    """The user's clipboard goes back after a paste, and the dictation is left neither in it nor in
+    the clipboard history. wl-paste exits non-zero on an empty clipboard too, so the old
+    `returncode == 0` test left the transcript in the clipboard for good in that case."""
+    try:
+        still = subprocess.run(["wl-paste", "--no-newline", "--type", "text/plain"],
+                               capture_output=True, timeout=CLIP_TIMEOUT)
+        if still.stdout.decode(errors="ignore") != text:
+            return                           # somebody copied something else meanwhile: leave it
+        if saved.returncode == 0:
+            subprocess.run(["wl-copy"], input=saved.stdout, timeout=CLIP_TIMEOUT)
+        else:
+            subprocess.run(["wl-copy", "--clear"], timeout=CLIP_TIMEOUT)
+        if CLIPHIST:
+            # hypr's cliphist watcher stored the transcript the moment wl-copy took the clipboard
+            subprocess.run([CLIPHIST, "delete-query", text], timeout=CLIP_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"flowd: clipboard: {e}", flush=True)
+
+
+def record(text, raw, window, ms=None):
+    path = os.path.join(STATE_DIR, "history.jsonl")
+    try:
+        lines = open(path).read().splitlines()[-299:] if os.path.exists(path) else []
+        lines.append(json.dumps({"t": int(time.time() * 1000), "text": text, "raw": raw, "app": window.get("class", ""), "ms": ms or {}}))
+        # 0600: this is everything ever dictated, and it was created world-readable
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def claim():
+    """One flowd. serve() removes the socket and rebinds it, so a second daemon - the realistic
+    outcome of a hand restart, which is the only way to change the engine or the word list - took
+    the socket and the pill while the first stayed alive, still able to open the microphone and
+    still able to type into the focused window. The lock is held for the process's life."""
+    fh = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(f"flowd: another flowd holds {LOCK_FILE}; leaving the socket to it", flush=True)
+        raise SystemExit(1)
+    return fh
+
+
+def on_term(signum, frame):
+    """systemd stops flowd mid-dictation on a logout or a restart. An insert in flight holds the
+    user's clipboard in a daemon thread that dies with the process, so wait briefly for it to put
+    the clipboard back, then take the socket file with us rather than leave a dead one behind."""
+    INSERT.acquire(timeout=6)
+    try:
+        os.unlink(SOCK)
+    except OSError:
+        pass
+    os._exit(0)
+
+
+def serve(flow):
+    if os.path.exists(SOCK):
+        os.unlink(SOCK)
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(SOCK)
+    os.chmod(SOCK, 0o600)
+    srv.listen(8)
+
+    def handle(conn):
+        buf = b""
+        watching = False
+        try:
+            while True:
+                b = conn.recv(4096)
+                if not b:
+                    break
+                buf += b
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    try:
+                        req = json.loads(line)
+                    except ValueError:
+                        continue
+                    op = req.get("op")
+                    if op == "watch" and not watching:
+                        watching = True
+                        flow.hub.add(conn)
+                        conn.sendall((json.dumps({"ev": "state", "state": flow.state, "text": "",
+                                                  "build": build(), "proto": PROTO}) + "\n").encode())
+                    elif op == "start":
+                        flow.start()
+                    elif op == "stop":
+                        flow.stop()
+                    elif op == "cancel":
+                        flow.cancel()
+                    elif op == "file":
+                        flow.start(wav=req.get("path"), dry=bool(req.get("dry", True)))
+                    elif op == "insert" and req.get("text"):
+                        threading.Thread(target=flow.insert_later, args=(req["text"],), daemon=True).start()
+                    elif op == "status":
+                        conn.sendall((json.dumps({"ev": "status", "state": flow.state,
+                                                  "build": build(), "proto": PROTO}) + "\n").encode())
+        except OSError:
+            pass
+        finally:
+            flow.hub.drop(conn)
+            conn.close()
+
+    while True:
+        conn, _ = srv.accept()
+        threading.Thread(target=handle, args=(conn,), daemon=True).start()
+
+
+if __name__ == "__main__":
+    os.makedirs(CONF_DIR, exist_ok=True)
+    lock = claim()
+    signal.signal(signal.SIGTERM, on_term)
+    signal.signal(signal.SIGINT, on_term)
+    # One line about what is actually answering. Until this existed flowd printed nothing at
+    # startup: not its build, not its socket, not that no config file was found and every setting
+    # was a default, so a wrong engine or a stale daemon looked like a hearing problem.
+    conf = load_conf()
+    engine = conf["engine"]
+    model = {"live": conf["live_model"], "gemini": conf["hearing_model"]}.get(engine, conf["model"])
+    print(f"flowd: build {build()} · protocol {PROTO} · socket {SOCK}", flush=True)
+    print(f"flowd: config {CONF_FILE if os.path.exists(CONF_FILE) else f'defaults, no {CONF_FILE}'}"
+          f" · engine {engine} · model {model} · {len(load_words())} words", flush=True)
+    serve(Flow())

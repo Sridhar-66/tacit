@@ -1,0 +1,18 @@
+[Unit]
+Description=FileManager1 for Tacit: "show in folder" opens Files, not Nautilus
+After=tacit-session.target
+PartOf=tacit-session.target
+
+[Service]
+# The name has to stay owned for the whole session: released, it goes to Nautilus the first time
+# any GTK app activates org.gnome.Nautilus, and D-Bus then never activates this again.
+Type=dbus
+BusName=org.freedesktop.FileManager1
+ExecStart=%h/.local/bin/quiet-filemanager1
+Restart=on-failure
+RestartSec=2
+# it waits on a bus name and spawns one short qs call per request
+MemoryHigh=64M
+
+[Install]
+WantedBy=tacit-session.target

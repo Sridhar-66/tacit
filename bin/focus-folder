@@ -1,0 +1,30 @@
+#!/bin/sh
+# The folder of the focused window, for a quick question asked from the notch: a terminal's
+# working directory (what its shell runs in the foreground, else the shell, as
+# services/Attention.qml cwdFor reads it), the folder open in Files, the project open in Code.
+# Anything else, or nothing found: home.
+TACIT_SHELL=${TACIT_SHELL:-$HOME/.config/quickshell/tacit}  # the shell's folder (the package sets TACIT_SHELL)
+w=$(hyprctl activewindow -j 2>/dev/null)
+class=$(printf %s "$w" | jq -r '.class // empty')
+title=$(printf %s "$w" | jq -r '.title // empty')
+pid=$(printf %s "$w" | jq -r '.pid // empty')
+d=""
+case "$class" in
+    foot|footclient|kitty|Alacritty|com.mitchellh.ghostty)
+        # the shell is the terminal's first child, the foreground program the shell's; deeper
+        # children are that program's own helpers (an agent's tools run in scratch folders)
+        sh=$(pgrep -P "$pid" | head -1)
+        [ -n "$sh" ] || sh=$pid
+        fg=$(pgrep -P "$sh" | head -1)
+        for p in $fg $sh; do
+            c=$(readlink "/proc/$p/cwd" 2>/dev/null) && [ -d "$c" ] && { d=$c; break; }
+        done ;;
+    graphis)
+        d=$(qs -p "$TACIT_SHELL/code.qml" ipc call code root 2>/dev/null) ;;
+    org.quickshell)
+        # the shell's own windows share its class; Files is the one with a folder
+        if [ "$title" = "Files" ]; then
+            d=$(jq -r '.lastFolder // empty' "$HOME/.local/state/quickshell/user/files/state.json" 2>/dev/null)
+        fi ;;
+esac
+if [ -n "$d" ] && [ -d "$d" ]; then echo "$d"; else echo "$HOME"; fi

@@ -1,0 +1,30 @@
+#!/bin/sh
+# Say out loud that one of the desktop's own user services gave up. Pulled in by OnFailure= in
+# each unit; the failing unit's full name arrives as $1.
+#
+# Without this a daemon that exhausted its restart limit is invisible until somebody thinks to
+# run systemctl - dictation, foreground priority and the CMA watchdog have all been found dead
+# that way. The shape is qs-supervise's failure floor: a note on disk that can be read from a
+# TTY, plus both notifiers, because the shell that draws notifications may be the thing missing.
+set -u
+unit=${1:-a service}
+dir="$HOME/.cache/tacit-daemon-failed"
+note="$dir/$unit.txt"
+mkdir -p "$dir" 2>/dev/null || true
+{
+	echo "$unit failed at $(date '+%F %T')"
+	echo
+	echo "systemd has stopped restarting it. To try again:"
+	echo "  systemctl --user status $unit"
+	echo "  systemctl --user reset-failed $unit && systemctl --user start $unit"
+	echo
+	echo "Last 40 journal lines:"
+	echo "-------------------------------------------------------------"
+	journalctl --user -u "$unit" -n 40 --no-pager 2>/dev/null
+} > "$note" 2>/dev/null
+# Hyprland's own notifier works without the shell's notification daemon.
+hyprctl notify -1 15000 "rgb(ff5555)" \
+	"$unit gave up - see ~/.cache/tacit-daemon-failed/$unit.txt" >/dev/null 2>&1 || true
+notify-send -u critical -a Tacit "$unit gave up" \
+	"It will not be restarted. See ~/.cache/tacit-daemon-failed/$unit.txt" >/dev/null 2>&1 || true
+exit 0

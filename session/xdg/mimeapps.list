@@ -1,0 +1,41 @@
+# Tacit's apps for files and links, for everyone (tacit-session): pictures, films, sound and PDFs in Viewer, text in
+# Graphis, the web in Thyris, folders in Files. The owner's choices (2026-10-16); a person's own
+# ~/.config/mimeapps.list wins.
+[Default Applications]
+image/png=viewer.desktop
+image/jpeg=viewer.desktop
+image/gif=viewer.desktop
+image/webp=viewer.desktop
+image/bmp=viewer.desktop
+image/tiff=viewer.desktop
+image/svg+xml=viewer.desktop
+application/pdf=viewer.desktop
+video/mp4=viewer.desktop
+video/x-matroska=viewer.desktop
+video/webm=viewer.desktop
+video/quicktime=viewer.desktop
+video/x-msvideo=viewer.desktop
+audio/mpeg=viewer.desktop
+audio/flac=viewer.desktop
+audio/x-wav=viewer.desktop
+audio/ogg=viewer.desktop
+audio/mp4=viewer.desktop
+text/plain=graphis-file.desktop
+text/markdown=graphis-file.desktop
+application/json=graphis-file.desktop
+text/html=thyris.desktop
+x-scheme-handler/http=thyris.desktop
+x-scheme-handler/https=thyris.desktop
+inode/directory=quiet-files.desktop
+text/x-python=graphis-file.desktop
+text/x-shellscript=graphis-file.desktop
+text/x-qml=graphis-file.desktop
+application/javascript=graphis-file.desktop
+text/x-csrc=graphis-file.desktop
+image/x-icon=viewer.desktop
+video/x-m4v=viewer.desktop
+audio/x-flac=viewer.desktop
+audio/opus=viewer.desktop
+audio/wav=viewer.desktop
+audio/x-m4a=viewer.desktop
+audio/aac=viewer.desktop

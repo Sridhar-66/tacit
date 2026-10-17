@@ -1,0 +1,32 @@
+#!/bin/bash
+# Pull requests for the notch. For each repo given (owner/name), print one JSON line per PR:
+#   {"repo","number","title","state","checks","review","url","updated"}
+#   state:  OPEN | MERGED | CLOSED          checks: success | failure | pending | none
+#   review: true when a review is requested from you
+# Prints nothing when gh is not logged in or offline, so the shell simply sees no change.
+#   --fixture <file>   print that file instead (tests)
+set -u
+[ "${1:-}" = "--fixture" ] && { cat "$2"; exit 0; }
+# a fixture dropped in the runtime dir stands in for gh (tests; gone at reboot)
+fx=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/notch-prs.fixture
+[ -f "$fx" ] && { cat "$fx"; exit 0; }
+command -v gh >/dev/null || exit 0
+# gh keeps its sign-in in the keyring: asked while the login keyring is still locked (the boot lock up), it opens the
+# keyring's unlock prompt in the notch. Nothing until it is open; the next poll, five minutes on, asks again.
+[ "$(busctl --user get-property org.freedesktop.secrets /org/freedesktop/secrets/collection/login \
+	org.freedesktop.Secret.Collection Locked 2>/dev/null)" = "b true" ] && exit 0
+gh auth status >/dev/null 2>&1 || exit 0
+for repo in "$@"; do
+	timeout 30 gh pr list -R "$repo" --state all --limit 30 \
+		--json number,title,state,reviewRequests,statusCheckRollup,updatedAt,url 2>/dev/null \
+	| jq -c --arg repo "$repo" --arg me "$(gh api user --jq .login 2>/dev/null)" '
+		.[] | {
+			repo: $repo, number, title, state, url, updated: .updatedAt,
+			checks: (if (.statusCheckRollup // []) | length == 0 then "none"
+				elif any(.statusCheckRollup[]; (.conclusion // "") == "FAILURE" or (.state // "") == "FAILURE") then "failure"
+				elif any(.statusCheckRollup[]; (.status // "") == "IN_PROGRESS" or (.state // "") == "PENDING" or (.conclusion // "") == "") then "pending"
+				else "success" end),
+			review: (any((.reviewRequests // [])[]; (.login // "") == $me))
+		}' 2>/dev/null
+done
+exit 0

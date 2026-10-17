@@ -1,0 +1,6 @@
+[Desktop Entry]
+# Tacit hides this tool from search and menus (it came with a driver, printing or the look); the program stays
+Type=Application
+Name=bvnc
+Hidden=true
+NoDisplay=true

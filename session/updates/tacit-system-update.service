@@ -1,0 +1,17 @@
+# Installs the downloaded updates while the computer restarts, before anything else starts (systemd.offline-updates(7)):
+# /system-update is there when tacit-update now or night asked for it
+[Unit]
+Description=Tacit: install the updates while the computer restarts
+DefaultDependencies=no
+# the system bus too, as systemd.offline-updates(7) has it: without it the restart at the end could not reach systemd
+Requires=sysinit.target dbus.socket
+After=sysinit.target dbus.socket systemd-journald.socket system-update-pre.target
+Before=system-update.target
+ConditionPathExists=/system-update
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/tacit/tacit-update install
+
+[Install]
+WantedBy=system-update.target

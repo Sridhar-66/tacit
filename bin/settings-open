@@ -1,0 +1,4 @@
+#!/bin/sh
+# settings-open [page]   Tacit's Settings, on that page, in front (scripts/settings/open.sh: one window).
+# The launcher's and the dock's "Settings" entry calls it.
+exec "${TACIT_SHELL:-$HOME/.config/quickshell/tacit}/scripts/settings/open.sh" "$@"

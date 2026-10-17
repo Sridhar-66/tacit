@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Praxis
+GenericName=Agent Sessions
+Comment=Agent sessions, running and past
+Keywords=claude;agent;ai;session;sessions;chat;praxis;
+Exec=claude-app
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+Categories=Development;
+StartupWMClass=praxis

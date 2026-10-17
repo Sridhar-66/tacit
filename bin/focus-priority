@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""focus-priority: the app in front gets the machine first (macOS's App Nap and QoS, here).
+
+Follows Hyprland's active window. When it belongs to an app started in its own scope
+(~/.local/bin/app-scope, under app-graphical.slice), that scope gets a larger CPU share (and
+would be the last app systemd-oomd stops, if oomd runs); the app that was in front goes back
+to the default. A window outside those scopes
+(the shell, a terminal's children) changes nothing.
+"""
+import glob
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+
+# the app in front is also the last one systemd-oomd would stop, the way iOS treats the foreground app
+# CPU only: a memory reserve here was part of the setup that froze the machine on 2026-09-22
+FRONT = {"CPUWeight": "500", "ManagedOOMPreference": "avoid"}
+BACK = {"CPUWeight": "100", "ManagedOOMPreference": "none"}
+RUN = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+# The scope we last boosted, on disk: a restart with nothing here left the previous front app
+# at CPUWeight 500 and oomd-avoid for the rest of the session - oomd's best candidate, quietly
+# exempted on the machine whose freezes come from memory exhaustion.
+FRONT_FILE = f"{RUN}/focus-priority.front"
+
+
+def log(msg):
+    print(f"focus-priority: {msg}", flush=True)
+
+
+def socket_path():
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+    path = f"{RUN}/hypr/{sig}/.socket2.sock"
+    if sig and os.path.exists(path):
+        return path
+    found = sorted(glob.glob(f"{RUN}/hypr/*/.socket2.sock"), key=os.path.getmtime)
+    return found[-1] if found else None
+
+
+def active_pid():
+    try:
+        out = subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, timeout=2).stdout
+        return int(json.loads(out or "{}").get("pid", 0))
+    except (ValueError, subprocess.SubprocessError):
+        return 0
+
+
+def scope_of(pid):
+    """The app scope a process runs in, or None when it is not one of ours."""
+    try:
+        path = open(f"/proc/{pid}/cgroup").read().strip().split("::", 1)[-1]
+    except OSError:
+        return None
+    if "/app-graphical.slice/" not in path:
+        return None
+    unit = path.rsplit("/", 1)[-1]
+    return unit if unit.endswith(".scope") else None
+
+
+def apply(unit, props):
+    args = ["systemctl", "--user", "set-property", "--runtime", unit] + [f"{k}={v}" for k, v in props.items()]
+    try:
+        return subprocess.run(args, capture_output=True, timeout=5).returncode == 0
+    except subprocess.SubprocessError as e:
+        # A systemctl timeout used to end the daemon with a traceback (TimeoutExpired is not an
+        # OSError), which is how a scope got left boosted. One slow call is not worth that.
+        log(f"set-property {unit} failed ({e})")
+        return False
+
+
+def remember(unit):
+    try:
+        with open(FRONT_FILE, "w") as f:
+            f.write(unit or "")
+    except OSError as e:
+        log(f"cannot record the front scope ({e})")
+
+
+def hand_back_remembered():
+    """Undo the boost a previous run left behind (it may well have quit since: quiet either way)."""
+    try:
+        with open(FRONT_FILE) as f:
+            unit = f.read().strip()
+    except OSError:
+        return
+    if unit:
+        apply(unit, BACK)
+    remember("")
+
+
+def take_front(unit, front):
+    # the scope of an app that has quit is gone: nothing to hand back
+    if front is not None:
+        apply(front, BACK)
+    front = unit if apply(unit, FRONT) else None
+    remember(front)
+    return front
+
+
+def follow(path):
+    front = None
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.connect(path)
+        log(f"following {path}")
+        # the window already in front when we connect: without this it keeps the default share
+        # until you switch away and come back
+        unit = scope_of(active_pid())
+        if unit is not None:
+            front = take_front(unit, None)
+        buf = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                return
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if not line.startswith(b"activewindowv2>>"):
+                    continue
+                unit = scope_of(active_pid())
+                if unit is None or unit == front:
+                    continue
+                front = take_front(unit, front)
+
+
+def main():
+    while True:
+        path = socket_path()
+        if path is None:
+            time.sleep(5)
+            continue
+        hand_back_remembered()
+        try:
+            follow(path)
+        except OSError as e:
+            log(f"lost Hyprland ({e}); looking again")
+        time.sleep(2)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

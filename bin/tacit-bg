@@ -1,0 +1,10 @@
+#!/bin/sh
+# tacit-bg <command...>
+#
+# Run heavy background work (a build, a check harness, a backup) the way macOS runs background-QoS
+# work and Windows its efficiency mode: in systemd's background.slice (CPU weight 30 against the
+# apps' 100), at low priority, on the second core cluster only (cores 4-7), so the first stays
+# free for the desktop and the chip runs cooler. Without a user manager the command runs plainly.
+[ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus" ] || exec "$@"
+exec systemd-run --user --scope --collect --quiet --slice=background.slice \
+    --unit="tacit-bg-$$" -- nice -n 10 taskset -c 4-7 "$@"

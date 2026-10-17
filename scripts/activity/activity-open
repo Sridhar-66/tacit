@@ -1,0 +1,11 @@
+#!/bin/sh
+# activity-open [now|battery|disk|stuck:<pid>:<seconds>]   Activity, on that page, in front.
+#
+# One Activity, one window: tacit-app starts it if it is not up, the page is handed over IPC, the
+# window is raised. Installed to ~/.local/bin; Ctrl+Shift+Esc, the launcher and the notch call it.
+page=${1:-now}
+T="${TACIT_BIN:-$HOME/.local/bin}/tacit-app"   # Tacit's launchers (the package sets TACIT_BIN)
+ACTIVITY_PAGE="$page" "$T" ensure activity >/dev/null || exit 1
+"$T" call activity page "$page" >/dev/null 2>&1
+"$T" focus activity
+exit 0

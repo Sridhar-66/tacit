@@ -1,0 +1,23 @@
+#!/bin/bash
+# tacit-fetch-updates: keep this computer's list of packages fresh and download the waiting updates, never install them
+# (macOS's "Download new updates when available"). Getting an app in Apps then finds the updates it comes with already here.
+# Runs as the system from tacit-fetch-updates.timer. Skips quietly while pacman is busy, on battery under 40 %, or offline.
+# (From ~/dev/tacit-updates 5b2428e; tacit-session installs it.)
+set -u
+
+[ -e /var/lib/pacman/db.lck ] && exit 0
+
+on_mains=0 battery=""
+for d in /sys/class/power_supply/*; do
+    case "$(cat "$d/type" 2>/dev/null)" in
+        Mains) [ "$(cat "$d/online" 2>/dev/null)" = 1 ] && on_mains=1 ;;
+        Battery) c=$(cat "$d/capacity" 2>/dev/null) && [ -n "$c" ] && battery=$c ;;
+    esac
+done
+if [ "$on_mains" = 0 ] && [ -n "$battery" ] && [ "$battery" -lt 40 ]; then
+    echo "on battery at ${battery} %: not now"
+    exit 0
+fi
+
+# -Syuw: refresh the list and download what the next update needs; nothing is installed or removed
+exec pacman -Syuw --noconfirm --noprogressbar

@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.freedesktop.FileManager1
+Exec=/usr/lib/tacit/bin/quiet-filemanager1
+SystemdService=quiet-filemanager1.service

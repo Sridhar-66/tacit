@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Activity
+GenericName=Task manager
+Comment=See what is slowing the computer down, what uses the battery and what fills the disk
+Keywords=task;manager;process;memory;processor;cpu;battery;disk;quit;force;kill;slow;
+Exec=activity-open
+Icon=utilities-system-monitor
+Terminal=false
+Type=Application
+Categories=System;Monitor;
+StartupWMClass=activity

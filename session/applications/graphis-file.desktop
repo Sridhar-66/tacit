@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Graphis
+Comment=Open this file in Graphis
+Exec=code-file %f
+Icon=accessories-text-editor
+Terminal=false
+Type=Application
+NoDisplay=true
+MimeType=text/plain;text/markdown;text/x-python;text/x-csrc;text/x-c++src;text/x-chdr;text/x-java;text/x-shellscript;text/x-lua;text/x-qml;text/css;text/html;text/xml;text/x-diff;text/x-patch;application/javascript;application/json;application/x-yaml;application/x-shellscript;application/toml;application/xml;inode/x-empty;

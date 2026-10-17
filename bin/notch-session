@@ -1,0 +1,152 @@
+#!/bin/bash
+# Claude Code hook -> the notch. Every event arrives as JSON on stdin; this tells the island
+# which terminal window the session lives in and what it is doing:
+#
+#   SessionStart -> idle     UserPromptSubmit -> working     Stop -> done (+ its last line)
+#   Notification -> waiting  (permission prompt or a question: the agent needs you; not idle)
+#   PreToolUse   -> the activity line ("running make", "editing Island.qml"); async, never blocks
+#   SubagentStart/SubagentStop -> a sub-row under the session while a delegated agent runs
+#   SessionEnd   -> the row leaves
+#
+# It never answers anything on Claude's behalf: it only reports. The terminal window is found
+# by walking up from this process to the terminal that owns it; the result is cached per
+# session under $XDG_RUNTIME_DIR/notch-sessions.
+TACIT_SHELL=${TACIT_SHELL:-$HOME/.config/quickshell/tacit}  # the shell's folder (the package sets TACIT_SHELL)
+set -u
+input=$(cat)
+event=$(jq -r '.hook_event_name // empty' <<<"$input")
+sid=$(jq -r '.session_id // empty' <<<"$input")
+cwd=$(jq -r '.cwd // empty' <<<"$input")
+[ -n "$event" ] && [ -n "$sid" ] || exit 0
+
+dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/notch-sessions
+mkdir -p "$dir"
+
+# A session can ask to be left out of the notch by putting its id in this file: the demo take
+# is driven by a Claude session, and its own rows and command lines have no place in the story
+# the recording tells. Only that session goes quiet; every other one still reports.
+quiet=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/notch-quiet-sessions
+[ -f "$quiet" ] && grep -qxF "$sid" "$quiet" && exit 0
+# Bounded: the hooks run synchronously, so a shell that is reloading or wedged used to hold
+# every prompt submit for the hook's own 20 s timeout. The notch losing one event costs
+# nothing; the keyboard stalling costs the session.
+qs_call() { timeout 2 qs -p "$TACIT_SHELL" ipc call sessions "$@" >/dev/null 2>&1; }
+
+# the window: the first ancestor Hyprland knows as a window, so any terminal counts - a list of
+# six left every other one addressless, and an addressless row is one the notch never prunes.
+# The address is a window pointer: it dies with the terminal (`claude --resume` lives in a new
+# one) and Hyprland hands the same pointer out again, so it is cached as "<terminal pid> <addr>"
+# and re-resolved the moment that pid is no longer an ancestor of this hook.
+chain=""
+pid=$PPID
+while [ "${pid:-0}" -gt 1 ] 2>/dev/null; do
+	chain="$chain $pid"
+	pid=$(awk '/^PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null) || break
+done
+addr=""
+if [ -f "$dir/$sid.addr" ]; then
+	read -r cpid caddr < "$dir/$sid.addr" || true
+	case "$chain " in *" ${cpid:-0} "*) addr=${caddr:-} ;; esac
+fi
+if [ -z "$addr" ]; then
+	clients=$(hyprctl clients -j 2>/dev/null | jq -r '.[] | "\(.pid) \(.address)"' 2>/dev/null)
+	for pid in $chain; do
+		addr=$(awk -v p="$pid" '$1 == p {print $2; exit}' <<<"$clients")
+		[ -n "$addr" ] && { printf '%s %s\n' "$pid" "$addr" > "$dir/$sid.addr"; break; }
+	done
+fi
+
+printf '%s %s %s %s\n' "$(date +%H:%M:%S)" "$event" "${sid:0:8}" "${addr:-?}" >> "$dir/log"
+# tmpfs, a line per hook event, no reader but a debugger: keep the tail, not the session.
+[ "$(stat -c %s "$dir/log" 2>/dev/null || echo 0)" -gt 200000 ] &&
+	{ tail -c 100000 "$dir/log" > "$dir/log.trim" && mv "$dir/log.trim" "$dir/log"; }
+
+# Last known state per session, so a restarted shell can rebuild its rows (notch-sessions-restore).
+# Every event also goes to the day record (~/.local/state/crew/events.jsonl): the history the
+# notch's today strip draws and Crew's ledger reads.
+journal=${CREW_STATE:-$HOME/.local/state/crew}/events.jsonl
+# One day per file. The reader keeps only today's events but used to re-parse the whole
+# history on every append - 11,888 lines to keep 575 - on the shell's main thread, once per
+# hook, which is felt in the notch whenever several agents are working.
+roll() {
+	local today first
+	today=$(date +%F)
+	[ -s "$journal" ] || return 0
+	first=$(date -d "@$(( $(head -1 "$journal" | jq -r '.t // 0' 2>/dev/null || echo 0) / 1000 ))" +%F 2>/dev/null) || return 0
+	[ "$first" = "$today" ] && return 0
+	mv "$journal" "${journal%.jsonl}-$first.jsonl" 2>/dev/null || true
+}
+record() { mkdir -p "$(dirname "$journal")"; roll; jq -nc --arg k "$1" --arg s "$sid" --arg c "$cwd" --arg a "$addr" \
+	'{t: (now * 1000 | floor), kind: $k, session: $s, cwd: $c, addr: $a}' >> "$journal" 2>/dev/null; }
+report() { printf '%s\t%s\t%s\n' "$1" "$cwd" "$addr" > "$dir/$sid.state"; qs_call update "$sid" "$1" "$addr" "$cwd"; record "session.$1"; }
+
+case "$event" in
+SessionStart)     report idle ;;
+UserPromptSubmit) report working ;;
+Stop)
+	report done
+	# the one line the recap on return reads
+	last=$(jq -r '.last_assistant_message // ""' <<<"$input" | sed '/^[[:space:]]*$/d' | head -1 | cut -c1-140)
+	[ -n "$last" ] && { printf '%s' "$last" > "$dir/$sid.last"; qs_call last "$sid" "$last"; } ;;
+Notification)     report waiting ;;
+PreToolUse)
+	tool=$(jq -r '.tool_name // ""' <<<"$input")
+	case "$tool" in
+	Bash)
+		c=$(jq -r '.tool_input.command // ""' <<<"$input" | head -1)
+		case "$c" in
+		*"git commit"*|*"git -C "*" commit"*) line="committing" ;;
+		*"git push"*)                       line="pushing" ;;
+		*"git rebase"*|*"git merge"*)       line="rebasing" ;;
+		*"gh pr create"*)                   line="opening a PR" ;;
+		*pytest*|*"npm test"*|*"npm run test"*|*"cargo test"*|*"make test"*|*"go test"*) line="testing" ;;
+		make*|*" make"*|ninja*|*"cargo build"*|*"npm run build"*|*"go build"*|*"cmake --build"*) line="building" ;;
+		*"pacman -S"*|*"npm install"*|*"pip install"*|*"cargo add"*) line="installing" ;;
+		*grim*|*"ipc call island"*)         line="looking at the notch" ;;
+		rsync*|*" rsync "*|cp\ *|scp*)      line="copying files" ;;
+		*)                                  line="running $(printf '%s' "$c" | cut -c1-30)" ;;
+		esac ;;
+	Edit|Write|MultiEdit|NotebookEdit)
+		f=$(jq -r '.tool_input.file_path // ""' <<<"$input")
+		line="editing $(basename "$f")"
+		# the file's origin: "written by claude · <repo>" wherever it is shown later
+		[ -n "$f" ] && qs -p "$TACIT_SHELL" ipc call origins edited "$sid" "$f" >/dev/null 2>&1 ;;
+	Read)       line="reading $(jq -r '.tool_input.file_path // ""' <<<"$input" | xargs -r basename)" ;;
+	Grep|Glob)  line="searching" ;;
+	WebFetch|WebSearch) line="browsing" ;;
+	Agent|Task) line="delegating" ;;
+	*)          line="$(tr 'A-Z' 'a-z' <<<"$tool")" ;;
+	esac
+	printf '%s' "$line" > "$dir/$sid.activity"
+	qs_call activity "$sid" "$line" ;;
+SubagentStart|SubagentStop)
+	# field names are defensive: agent id and a description under whichever key Claude sends
+	aid=$(jq -r '.agent_id // ""' <<<"$input")
+	desc=$(jq -r '.agent_type // "agent"' <<<"$input")
+	[ -n "$aid" ] || aid=$(date +%s%N | cut -c1-12)
+	desc=$(printf '%s' "$desc" | head -1 | cut -c1-70)
+	if [ "$event" = SubagentStart ]; then
+		# The start event carries only the agent type: show the row now, then look for the
+		# Agent tool's own description in the parent transcript (the launch result names the
+		# agent id; that result's tool_use holds input.description) and rename the row.
+		qs_call agentStart "$sid" "$aid" "$desc"; record agent.start
+		tp=$(jq -r '.transcript_path // ""' <<<"$input")
+		[ -f "$tp" ] || exit 0
+		# Only the tail: transcripts here reach 500 MB, and six retries plus the second lookup
+		# pushed 3 GB through the page cache per delegated agent on a machine whose documented
+		# freeze cause is memory exhaustion. Both records were written moments ago, so 4 MB of
+		# tail holds them.
+		for _ in 1 2 3 4 5 6; do
+			tuid=$(tail -c 4000000 "$tp" 2>/dev/null | grep -F "agentId: $aid" | jq -r 'select(.type == "user") | .. | objects | select(.type? == "tool_result") | .tool_use_id' 2>/dev/null | head -1)
+			[ -n "$tuid" ] && break
+			sleep 1
+		done
+		[ -n "${tuid:-}" ] || exit 0
+		d=$(tail -c 4000000 "$tp" 2>/dev/null | grep -F "\"id\":\"$tuid\"" | jq -r --arg t "$tuid" 'select(.type == "assistant") | .. | objects | select(.type? == "tool_use" and .id == $t) | .input.description // ""' 2>/dev/null | head -1 | cut -c1-70)
+		[ -n "$d" ] && [ "$d" != "$desc" ] && qs_call agentStart "$sid" "$aid" "$d"
+		exit 0
+	fi
+	qs_call agentStop "$sid" "$aid"; record agent.stop ;;
+SessionEnd)       qs_call end "$sid"; rm -f "$dir/$sid".*; record session.end ;;
+esac
+exit 0

@@ -1,0 +1,29 @@
+# Tacit's prompt for everyone (tacit-session, /usr/share/tacit/starship.toml; fish/tacit.fish points Starship at it
+# unless the person has their own ~/.config/starship.toml). The owner's, 2026-10-16.
+# D: one line, folder and branch on the left, last-command time on the right. Every character is
+# foot's foreground (#EDD4C2) or colour 2 (#FFC06E) on the translucent ground.
+add_newline = false
+format = "$directory$git_branch$character"
+right_format = "$cmd_duration"
+
+[character]
+success_symbol = "[>](bold fg:2) "
+error_symbol = "[>](bold fg:9) "
+
+[directory]
+style = "bold"
+truncation_length = 2
+truncation_symbol = "…/"
+format = "[$path]($style) "
+
+[git_branch]
+symbol = ""
+truncation_length = 12
+truncation_symbol = ""
+style = "fg:2"
+format = "[$branch]($style) "
+
+[cmd_duration]
+min_time = 2000
+style = "fg:7"
+format = "[$duration]($style)"

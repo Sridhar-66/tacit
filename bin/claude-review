@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+# The review actions the Claude app's Review panel and Code share (one implementation, called
+# from both): the uncommitted hunks of a repository or of some of its files, compared with the
+# last commit, and reverting one hunk with an undo.
+#
+#   claude-review hunks <dir> [path ...]      JSON on stdout; no paths = every change in <dir>'s repo
+#   claude-review revert <dir> <path> <id>    reverse-apply one hunk; prints the undo patch
+#   claude-review restore <dir> <patch>       put a reverted hunk back (<dir>: inside its repo)
+#   claude-review status <dir>                branch, upstream, ahead/behind, remote, GitHub + gh
+#   claude-review draft <dir> [path ...]      a commit message for those changes (claude -p, haiku)
+#   claude-review commit <dir> <msg> [path ...]   stage those paths (all if none) and commit
+#   claude-review push <dir>                  push; sets the upstream on the first push
+#   claude-review pr <dir>                    open GitHub's pull request page (gh --web)
+#
+# With paths, each file's own repository is used, so a session that runs in ~ and edits files
+# in several repositories reviews them all; a file in no repository is listed without hunks.
+#
+# A new file git does not track yet shows as one hunk of added lines and cannot be reverted
+# here (that would mean deleting it). Undo patches live in $XDG_RUNTIME_DIR/claude-review.
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+UNDO = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "claude-review")
+MAX_NEW_LINES = 400
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, "-c", "core.quotePath=false", *args], capture_output=True, text=True)
+
+
+def toplevel(d):
+    r = subprocess.run(["git", "-C", d, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def base(repo):
+    return "HEAD" if git(repo, "rev-parse", "--verify", "-q", "HEAD").returncode == 0 else EMPTY_TREE
+
+
+def inside(repo, paths):
+    out = []
+    for p in paths:
+        a = os.path.realpath(p)
+        if a.startswith(repo + "/"):
+            out.append(a[len(repo) + 1:])
+    return out
+
+
+def hid(path, body):
+    return hashlib.sha1((path + "\n" + body).encode()).hexdigest()[:12]
+
+
+def parse(diff):
+    files, cur, hunk = [], None, None
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            cur = {"path": "", "status": "M", "header": [line], "hunks": [], "add": 0, "del": 0, "binary": False}
+            files.append(cur)
+            hunk = None
+            continue
+        if cur is None:
+            continue
+        if line.startswith("@@"):
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+            hunk = {"head": line, "lines": [], "line": int(m.group(1)) if m else 1, "add": 0, "del": 0}
+            cur["hunks"].append(hunk)
+            continue
+        if hunk is None:
+            if line.startswith("new file mode"):
+                cur["status"] = "A"
+            elif line.startswith("deleted file mode"):
+                cur["status"] = "D"
+            elif line.startswith("Binary files"):
+                cur["binary"] = True
+            elif line.startswith("+++ b/"):
+                cur["path"] = line[6:]
+            elif line.startswith("--- a/") and not cur["path"]:
+                cur["path"] = line[6:]
+            cur["header"].append(line)
+            continue
+        if line.startswith("\\") or (line and line[0] in "+- "):
+            hunk["lines"].append(line)
+            if line.startswith("+"):
+                hunk["add"] += 1
+                cur["add"] += 1
+            elif line.startswith("-"):
+                hunk["del"] += 1
+                cur["del"] += 1
+    for f in files:
+        f["patch"] = "\n".join(f["header"])
+        for h in f["hunks"]:
+            h["body"] = h["head"] + "\n" + "\n".join(h["lines"])
+            h["id"] = hid(f["path"], h["body"])
+    return files
+
+
+def untracked(repo, rel):
+    out = []
+    names = git(repo, "ls-files", "--others", "--exclude-standard", "-z", "--", *rel).stdout.split("\0")
+    for p in filter(None, names):
+        try:
+            with open(os.path.join(repo, p), encoding="utf-8") as fh:
+                text = fh.read()
+        except (UnicodeDecodeError, OSError):
+            out.append({"path": p, "status": "U", "add": 0, "del": 0, "binary": True, "hunks": []})
+            continue
+        lines = text.split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+        shown = ["+" + l for l in lines[:MAX_NEW_LINES]]
+        body = f"@@ -0,0 +1,{len(lines)} @@\n" + "\n".join(shown)
+        out.append({"path": p, "status": "U", "add": len(lines), "del": 0, "binary": False,
+                    "hunks": [{"id": hid(p, body), "line": 1, "body": body, "add": len(lines), "del": 0,
+                               "cut": len(lines) > MAX_NEW_LINES}]})
+    return out
+
+
+def repo_files(repo, rel):
+    files = parse(git(repo, "diff", "--no-color", "-U2", base(repo), "--", *rel).stdout)
+    files += untracked(repo, rel)
+    for f in files:
+        f["abs"] = os.path.join(repo, f["path"])
+        f["repo"] = repo
+        f.pop("header", None)
+        f.pop("patch", None)
+        for h in f["hunks"]:
+            h.pop("head", None)
+            h.pop("lines", None)
+    return files
+
+
+def hunks(d, paths):
+    if not paths:
+        repo = toplevel(d)
+        return {"repo": repo, "files": repo_files(repo, []) if repo else []}
+    groups, outside, tops = {}, [], {}   # tops: a folder's repository, asked once per folder
+    for p in paths:
+        a = os.path.realpath(p)
+        d = os.path.dirname(a)
+        if d not in tops:
+            tops[d] = toplevel(d) if os.path.isdir(d) else None
+        repo = tops[d]
+        if repo:
+            groups.setdefault(repo, []).append(a)
+        else:
+            outside.append({"path": a, "abs": a, "repo": None, "status": "?", "add": 0, "del": 0, "hunks": [], "outside": True})
+    files = []
+    for repo, members in groups.items():
+        files += repo_files(repo, inside(repo, members))
+    return {"repo": next(iter(groups), None), "files": files + outside}
+
+
+def revert(d, path, want):
+    repo = toplevel(os.path.dirname(os.path.realpath(path))) or toplevel(d)
+    if not repo:
+        sys.exit("not a git repository")
+    rel = inside(repo, [path])
+    if not rel:
+        sys.exit("that file is not in this repository")
+    for f in parse(git(repo, "diff", "--no-color", "-U2", base(repo), "--", rel[0]).stdout):
+        for h in f["hunks"]:
+            if h["id"] != want:
+                continue
+            os.makedirs(UNDO, exist_ok=True)
+            pf = os.path.join(UNDO, h["id"] + ".patch")
+            with open(pf, "w", encoding="utf-8") as fh:
+                fh.write(f["patch"] + "\n" + h["body"] + "\n")
+            r = git(repo, "apply", "-R", pf)
+            if r.returncode:
+                sys.exit(r.stderr.strip() or "the change could not be taken back")
+            print(json.dumps({"ok": True, "undo": pf}))
+            return
+    sys.exit("that change is no longer there")
+
+
+def restore(d, pf):
+    repo = toplevel(d)
+    if not repo:
+        sys.exit("not a git repository")
+    r = git(repo, "apply", pf)
+    if r.returncode:
+        sys.exit(r.stderr.strip() or "the change could not be put back")
+    print(json.dumps({"ok": True}))
+
+
+def status(d):
+    repo = toplevel(d)
+    if not repo:
+        return {"repo": None}
+    branch = git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    upstream = git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    up = upstream.stdout.strip() if upstream.returncode == 0 else ""
+    ahead = behind = 0
+    if up:
+        counts = git(repo, "rev-list", "--left-right", "--count", f"{up}...HEAD").stdout.split()
+        if len(counts) == 2:
+            behind, ahead = int(counts[0]), int(counts[1])
+    remote = git(repo, "remote", "get-url", "origin").stdout.strip()
+    gh = subprocess.run(["which", "gh"], capture_output=True).returncode == 0
+    return {"repo": repo, "branch": branch, "upstream": up, "ahead": ahead, "behind": behind,
+            "remote": remote, "github": "github.com" in remote, "gh": gh}
+
+
+def draft(d, paths):
+    repo = toplevel(d)
+    if not repo:
+        sys.exit("not a git repository")
+    rel = inside(repo, paths) if paths else []
+    diff = git(repo, "diff", "--no-color", base(repo), "--", *rel).stdout
+    for p in git(repo, "ls-files", "--others", "--exclude-standard", "--", *rel).stdout.splitlines():
+        diff += f"\nnew file: {p}\n"
+    if not diff.strip():
+        sys.exit("nothing to commit in these files")
+    style = git(repo, "log", "-8", "--format=%s").stdout.strip()
+    prompt = ("Write the commit message for this diff. Match the style of these recent subjects:\n"
+              f"{style or '(no commits yet: use a short imperative subject)'}\n\n"
+              "A subject line under 72 characters; a short body only if the change needs one. "
+              "Reply with the message only, no quotes, no code fences.")
+    r = subprocess.run(["claude", "-p", "--model", "haiku", prompt], input=diff[:40000],
+                       capture_output=True, text=True, timeout=120)
+    if r.returncode or not r.stdout.strip():
+        sys.exit((r.stderr or "no message came back").strip().splitlines()[-1])
+    print(r.stdout.strip())
+
+
+def commit(d, message, paths):
+    repo = toplevel(d)
+    if not repo:
+        sys.exit("not a git repository")
+    if not message.strip():
+        sys.exit("the message is empty")
+    rel = inside(repo, paths) if paths else []
+    r = git(repo, "add", "--", *rel) if rel else git(repo, "add", "-A")
+    if r.returncode:
+        sys.exit(r.stderr.strip() or "could not stage")
+    r = git(repo, "commit", "-m", message)
+    if r.returncode:
+        sys.exit((r.stderr or r.stdout).strip().splitlines()[-1])
+    print(json.dumps({"ok": True, "hash": git(repo, "rev-parse", "--short", "HEAD").stdout.strip()}))
+
+
+def push(d):
+    st = status(d)
+    if not st["repo"]:
+        sys.exit("not a git repository")
+    if not st["remote"]:
+        sys.exit("this repository has no remote")
+    r = git(st["repo"], "push") if st["upstream"] else git(st["repo"], "push", "-u", "origin", "HEAD")
+    if r.returncode:
+        sys.exit((r.stderr or "push failed").strip().splitlines()[-1])
+    print(json.dumps({"ok": True}))
+
+
+def pr(d):
+    st = status(d)
+    if not st["repo"] or not st["github"] or not st["gh"]:
+        sys.exit("a GitHub remote and gh are needed")
+    r = subprocess.run(["gh", "pr", "create", "--web", "--fill"], cwd=st["repo"], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit((r.stderr or "gh failed").strip().splitlines()[-1])
+    print(json.dumps({"ok": True}))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        sys.exit(__doc__ or "usage: claude-review hunks|revert|restore <dir> ...")
+    cmd, d = sys.argv[1], sys.argv[2]
+    if cmd == "hunks":
+        print(json.dumps(hunks(d, sys.argv[3:])))
+    elif cmd == "revert" and len(sys.argv) == 5:
+        revert(d, sys.argv[3], sys.argv[4])
+    elif cmd == "restore" and len(sys.argv) == 4:
+        restore(d, sys.argv[3])
+    elif cmd == "status":
+        print(json.dumps(status(d)))
+    elif cmd == "draft":
+        draft(d, sys.argv[3:])
+    elif cmd == "commit" and len(sys.argv) >= 4:
+        commit(d, sys.argv[3], sys.argv[4:])
+    elif cmd == "push":
+        push(d)
+    elif cmd == "pr":
+        pr(d)
+    else:
+        sys.exit("usage: claude-review hunks|revert|restore <dir> ...")

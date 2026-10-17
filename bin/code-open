@@ -1,0 +1,22 @@
+#!/bin/sh
+# code-open [DIR]   open DIR's git project in the editor, or the project picker when
+#                   DIR is not inside a repository (the launcher starts it that way)
+#
+# One editor, one window. This used to exec qs unconditionally, so the launcher started a second
+# instance beside a running one, and `qs ipc` talks to the OLDEST instance - every later code-file
+# open went to the other window. The probe, the single-launch lock, the poll and the failure notice
+# are tacit-app's, shared with code-file and claude-hand, so the two entry points cannot race.
+T_BIN=${TACIT_BIN:-$HOME/.local/bin}                          # Tacit's launchers (the package sets TACIT_BIN)
+d=$(realpath "${1:-$PWD}" 2>/dev/null || echo "$HOME")
+top=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)
+T="$T_BIN/tacit-app"
+state=$(CODE_PROJECT="$top" "$T" ensure graphis) || exit 1
+# Already running: a fresh instance takes CODE_PROJECT at startup, one that was up is showing
+# whatever it was showing before and has to be pointed at this project.
+if [ "$state" = up ] && [ -n "$top" ]; then
+	cur=$("$T" call graphis root 2>/dev/null)
+	[ "$cur" != "$top" ] && "$T" call graphis open "$top"
+fi
+"$T" call graphis present >/dev/null 2>&1   # a closed window only hides
+"$T" focus graphis
+exit 0

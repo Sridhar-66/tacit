@@ -1,0 +1,10 @@
+[Desktop Entry]
+# Tacit: the terminal is called Terminal, not by its program name (tacit-session overrides foot's entry)
+Type=Application
+Exec=foot
+Icon=foot
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;commandline;
+Name=Terminal
+GenericName=Terminal

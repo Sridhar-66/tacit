@@ -1,0 +1,12 @@
+[Unit]
+Description=Tacit graphical session
+Documentation=man:systemd.special(7)
+# graphical-session.target refuses a manual start, and Hyprland is not launched by a
+# systemd session generator, so nothing was ever pulling the desktop's own services in.
+# The compositor starts THIS target instead (see hypr/hyprland/execs.lua), and the
+# desktop's services are wanted by it.
+#
+# Deliberately NOT BindsTo/PartOf graphical-session.target: that target is inactive in
+# this session, so binding to it stops this one the moment it starts. Deliberately no
+# StopWhenUnneeded either, for the same reason.
+After=graphical-session-pre.target

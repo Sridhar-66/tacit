@@ -1,0 +1,23 @@
+#!/bin/sh
+# viewer-copy <file> <kind>   the file onto the clipboard as a file (text/uri-list), and for a picture as the
+# picture too (image/png), so it pastes into Opsis, Pinax, Praxis or a chat. viewer-clip offers both at once.
+f=$1; kind=$2
+d="$HOME/.cache/tacit-viewer/clip"; mkdir -p "$d"
+here=$(dirname "$0")
+clip="$here/viewer-clip"; [ -x "$clip" ] || clip=$(command -v viewer-clip)
+[ -n "$clip" ] || { [ -x "$d/viewer-clip" ] || sh "$here/build-clip.sh" "$d" >/dev/null 2>&1; [ -x "$d/viewer-clip" ] && clip="$d/viewer-clip"; }
+python3 -c 'import sys, urllib.parse; sys.stdout.write("file://" + urllib.parse.quote(sys.argv[1]) + "\r\n")' "$f" > "$d/uri"
+if [ -z "$clip" ]; then
+    # viewer-clip is missing and could not be built: one format only, so a picture goes as the picture
+    echo "viewer-copy: viewer-clip missing (scripts/viewer/build-clip.sh builds it); copying one format" >&2
+    if [ "$kind" = image ]; then magick "$f[0]" -auto-orient "$d/picture.png" 2>/dev/null && exec wl-copy --type image/png < "$d/picture.png"; fi
+    exec wl-copy --type text/uri-list < "$d/uri"
+fi
+if [ "$kind" = image ]; then
+    case "$f" in
+        *.png|*.PNG) png=$f ;;
+        *) png="$d/picture.png"; magick "$f[0]" -auto-orient "$png" 2>/dev/null || png= ;;
+    esac
+    [ -n "$png" ] && exec "$clip" text/uri-list="$d/uri" image/png="$png"
+fi
+exec "$clip" text/uri-list="$d/uri"

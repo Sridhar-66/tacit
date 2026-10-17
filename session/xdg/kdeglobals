@@ -1,0 +1,13 @@
+# Tacit's Qt look for everyone (tacit-session, in Tacit's XDG_CONFIG_DIRS): fonts, icons, the terminal. A person's own
+# ~/.config/kdeglobals wins; its colours are written there from the wallpaper (switchwall.sh). No widget style: the
+# owner's Darkly is not in Arch's repositories, so Qt widget apps draw with Fusion in Tacit's colours.
+[General]
+TerminalApplication=foot
+fixed=Tacit Mono,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+font=Tacit Sans,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+menuFont=Tacit Sans,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+smallestReadableFont=Tacit Sans,9,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+toolBarFont=Tacit Sans,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+
+[Icons]
+Theme=Quiet

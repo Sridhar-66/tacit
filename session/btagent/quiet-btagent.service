@@ -1,0 +1,18 @@
+[Unit]
+Description=Bluetooth pairing agent for the Tacit shell
+Documentation=file:%h/book4-edge/btagent/README.md
+# BlueZ is the whole point of the program: with no bluetoothd there is nothing to register with.
+After=tacit-session.target
+PartOf=tacit-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/quiet-btagent
+# A crash while nothing is pairing costs nothing; a crash loop should not be silent, so the
+# restart is slow enough to read in the journal.
+Restart=on-failure
+RestartSec=5
+MemoryHigh=32M
+
+[Install]
+WantedBy=tacit-session.target

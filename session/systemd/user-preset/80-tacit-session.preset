@@ -1,0 +1,4 @@
+# Tacit: services every person needs (tacit-session): the keyring the lock opens, and the home folders (Documents,
+# Pictures, ...) Files and the screenshot tools use. tacit-install applies the presets (systemctl --global preset-all).
+enable gnome-keyring-daemon.socket
+enable xdg-user-dirs.service

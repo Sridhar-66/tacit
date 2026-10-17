@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Settings
+Comment=Wi-Fi, sound, displays, the look and everything else about this computer
+Keywords=settings;preferences;control;system;wifi;bluetooth;display;sound;wallpaper;
+Exec=settings-open
+Icon=preferences-system
+Terminal=false
+Type=Application
+Categories=Settings;System;
+StartupWMClass=settings

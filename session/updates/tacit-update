@@ -1,0 +1,60 @@
+#!/bin/bash
+# tacit-update now|tonight|night|install: Tacit's updates, installed while the computer restarts (systemd's offline
+# updates, systemd.offline-updates(7)). tacit-fetch-updates has already downloaded them.
+#   now      the next start installs them (the notch's or Settings' Restart, through tacit-update@now.service)
+#   tonight  at 03:00, on the charger, with the screen locked (tacit-update-night.timer wakes the computer for it)
+#   night    what that timer runs; not on the charger, or someone at the computer: the next night
+#   install  what the start runs before anything else (tacit-system-update.service); then it restarts
+# How it went is /var/lib/tacit/update-result, which the shell says once in the notch.
+set -u
+state=/var/lib/tacit
+mkdir -p "$state"
+
+case "${1:-}" in
+now)
+	ln -sfn /var/cache/pacman/pkg /system-update
+	;;
+tonight)
+	systemctl start tacit-update-night.timer
+	;;
+night)
+	mains=0 battery=0
+	for d in /sys/class/power_supply/*; do
+		case "$(cat "$d/type" 2>/dev/null)" in
+			Mains) [ "$(cat "$d/online" 2>/dev/null)" = 1 ] && mains=1 ;;
+			Battery) battery=1 ;;
+		esac
+	done
+	# a computer without a battery is always on the charger
+	[ "$mains" = 1 ] || [ "$battery" = 0 ] || exit 0
+	# someone at the computer at three in the morning keeps their work: only a locked screen restarts
+	for s in $(loginctl list-sessions --no-legend | awk '{print $1}'); do
+		[ "$(loginctl show-session "$s" -p Active --value)" = yes ] && [ "$(loginctl show-session "$s" -p Type --value)" = wayland ] \
+			&& [ "$(loginctl show-session "$s" -p LockedHint --value)" != yes ] && exit 0
+	done
+	systemctl stop tacit-update-night.timer
+	ln -sfn /var/cache/pacman/pkg /system-update
+	systemctl reboot
+	;;
+install)
+	# taken away first: an install that fails can never run again at every start
+	rm -f /system-update
+	before=$(pacman -Q)
+	pacman -Su --noconfirm --noprogressbar > "$state/update.log" 2>&1
+	rc=$?
+	after=$(pacman -Q)
+	untouched=false
+	[ "$before" = "$after" ] && untouched=true
+	ok=false
+	[ "$rc" = 0 ] && ok=true
+	printf '{"at": %s, "ok": %s, "untouched": %s, "version": "%s"}\n' "$(date +%s)" "$ok" "$untouched" \
+		"$(pacman -Q tacit 2>/dev/null | awk '{print $2}')" > "$state/update-result.new"
+	chmod 644 "$state/update-result.new"
+	mv "$state/update-result.new" "$state/update-result"
+	systemctl reboot
+	;;
+*)
+	echo "usage: tacit-update now|tonight|night|install" >&2
+	exit 2
+	;;
+esac

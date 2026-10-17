@@ -1,0 +1,99 @@
+#!/bin/sh
+# tacit-app - one instance of one of the desktop's own quickshell apps, reachable and in front.
+#
+#   tacit-app ensure <app>            make sure it answers; prints "up" or "started"
+#   tacit-app call <app> <fn> [args]  one IPC call to it
+#   tacit-app focus <app>             bring its window forward
+#
+# <app> is praxis (claude.qml), graphis (code.qml), viewer (viewer.qml), activity (activity.qml) or store (store.qml, "Apps"). `ensure` exits non-zero, having said so on
+# screen, when the app cannot be reached; the caller decides what to do without it.
+#
+# claude-hand, code-open and code-file each carried their own copy of this - the same probe, lock,
+# setsid, poll, log trim, failure notice and pid focus, with small divergences that made them
+# behave differently under a race, and code-open had no lock at all, which is why the launcher
+# started a second editor beside the one already running. One copy, three one-line callers.
+TACIT_SHELL=${TACIT_SHELL:-$HOME/.config/quickshell/tacit}  # the shell's folder (the package sets TACIT_SHELL)
+set -u
+
+app_paths() {
+	case "$1" in
+	praxis)
+		qml="$TACIT_SHELL/claude.qml"; target=claudeapp
+		log="$HOME/.cache/claude-app.log"; lock=claude-app; shown=Praxis ;;
+	graphis)
+		qml="$TACIT_SHELL/code.qml"; target=code
+		log="$HOME/.cache/code.log"; lock=code-app; shown=Graphis ;;
+	viewer)
+		qml="$TACIT_SHELL/viewer.qml"; target=viewer
+		log="$HOME/.cache/viewer.log"; lock=viewer-app; shown=Viewer ;;
+	activity)
+		qml="$TACIT_SHELL/activity.qml"; target=activity
+		log="$HOME/.cache/activity.log"; lock=activity-app; shown=Activity ;;
+	store)
+		qml="$TACIT_SHELL/store.qml"; target=store
+		log="$HOME/.cache/store.log"; lock=store-app; shown=Apps ;;
+	*)
+		echo "tacit-app: no app called '$1'" >&2; exit 2 ;;
+	esac
+}
+
+# `qs ipc` picks the instance by config path, so every call names the same -p as the launch.
+up() { qs -p "$qml" ipc call "$target" state >/dev/null 2>&1; }
+
+cmd=${1:-}
+[ $# -ge 2 ] || { echo "tacit-app: ensure|call|focus <praxis|graphis|viewer|activity|store>" >&2; exit 2; }
+app_paths "$2"
+
+case "$cmd" in
+ensure)
+	if up; then
+		echo up
+		exit 0
+	fi
+	# One launch at a time: two callers at once (a double click, or the launcher and a file open)
+	# both saw "not up" and both started an instance, and each instance is a window. Never /tmp:
+	# that path is shared between users, and a redirection onto a stranger's file exits this
+	# script before it can say anything.
+	lockfile="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$lock.lock"
+	touch "$lockfile" 2>/dev/null && [ -w "$lockfile" ] || {
+		echo "tacit-app: cannot use $lockfile" >&2
+		exit 1
+	}
+	exec 9>"$lockfile"
+	flock 9
+	state=started
+	if up; then
+		state=up          # somebody else started it while we waited for the lock
+	else
+		# A startup failure used to be completely silent: no window, no message, no log.
+		mkdir -p "$HOME/.cache" 2>/dev/null
+		[ -f "$log" ] && [ "$(wc -c < "$log")" -gt 2000000 ] &&
+			{ tail -c 500000 "$log" > "$log.trim" && mv "$log.trim" "$log"; }
+		# -n: exit at once if an instance is somehow already up rather than run two, of which the
+		# second is invisible but takes every ipc call that arrives while both live.
+		setsid qs -n -p "$qml" >> "$log" 2>&1 &
+		i=0
+		while [ $i -lt 60 ] && ! up; do sleep 0.1; i=$((i + 1)); done
+	fi
+	flock -u 9
+	if ! up; then
+		hyprctl notify -1 8000 "rgb(ff5555)" "$shown did not start - see $log" >/dev/null 2>&1
+		notify-send -u critical "$shown did not start" "See $log" >/dev/null 2>&1
+		exit 1
+	fi
+	echo "$state"
+	;;
+call)
+	shift 2
+	exec qs -p "$qml" ipc call "$target" "$@"   # the caller reads its output and its status
+	;;
+focus)
+	pid=$(pgrep -f -- "-p $qml$" | head -1)   # anchored: the instance, not an `ipc call` helper
+	[ -n "$pid" ] && hyprctl dispatch "hl.dsp.focus({ window = \"pid:$pid\" })" >/dev/null 2>&1
+	exit 0
+	;;
+*)
+	echo "tacit-app: ensure|call|focus <praxis|graphis|viewer|activity|store>" >&2
+	exit 2
+	;;
+esac

@@ -1,0 +1,12 @@
+#!/bin/sh
+# viewer-open <file>   show a picture, PDF, video or audio file in the viewer.
+#
+# One viewer, one window: tacit-app starts it if it is not up (the probe, the single-launch lock and the
+# failure notice are its), the file is handed over IPC, the window is raised.
+f=$(realpath -- "$1" 2>/dev/null) || exit 1
+T="${TACIT_BIN:-$HOME/.local/bin}/tacit-app"   # Tacit's launchers (the package sets TACIT_BIN)
+VIEWER_OPEN="$f" "$T" ensure viewer >/dev/null || exit 1
+"$T" call viewer open "$f" >/dev/null 2>&1
+"$T" call viewer present >/dev/null 2>&1   # a closed window only hides
+"$T" focus viewer
+exit 0

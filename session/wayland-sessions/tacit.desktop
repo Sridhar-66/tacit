@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Tacit
+Comment=The Tacit desktop
+Exec=start-hyprland -- --config /usr/share/tacit/hypr/hyprland.lua
+Type=Application
+DesktopNames=Tacit;Hyprland

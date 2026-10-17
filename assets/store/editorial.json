@@ -1,0 +1,317 @@
+{
+  "_about": "The store's own words: jobs, who each app suits, the feature. Everything else (names, icons, screenshots, versions, sizes, licences) comes from Arch's signed catalogue (archlinux-appstream-data) and pacman at run time. Package names are the repos' own.",
+  "feature": {
+    "pkg": "krita",
+    "line": "Draw and paint. Free, made by the KDE community.",
+    "crop": [
+      0.05,
+      0.259,
+      0.806,
+      0.6
+    ]
+  },
+  "picks": [
+    "blender",
+    "kdenlive",
+    "obs-studio"
+  ],
+  "jobs": [
+    {
+      "name": "Edit photos",
+      "glyph": "photo",
+      "pkgs": [
+        "gimp",
+        "darktable",
+        "pinta"
+      ],
+      "advice": "Used Photoshop? GIMP. Lightroom? darktable. Quick fixes? Pinta.",
+      "words": [
+        "photo",
+        "photos",
+        "picture",
+        "pictures",
+        "image",
+        "images",
+        "retouch",
+        "edit photos",
+        "raw",
+        "camera",
+        "photoshop",
+        "lightroom"
+      ]
+    },
+    {
+      "name": "Draw",
+      "glyph": "brush",
+      "pkgs": [
+        "krita",
+        "inkscape"
+      ],
+      "advice": "Painting and sketching? Krita. Logos and drawings that scale? Inkscape.",
+      "words": [
+        "draw",
+        "drawing",
+        "paint",
+        "painting",
+        "sketch",
+        "illustrate",
+        "illustrator",
+        "vector",
+        "logo",
+        "art"
+      ]
+    },
+    {
+      "name": "Write",
+      "glyph": "edit_note",
+      "pkgs": [
+        "libreoffice-fresh",
+        "obsidian"
+      ],
+      "advice": "Letters, sheets and slides? LibreOffice. Notes that link to each other? Obsidian.",
+      "words": [
+        "write",
+        "writing",
+        "document",
+        "documents",
+        "word",
+        "excel",
+        "spreadsheet",
+        "slides",
+        "office",
+        "notes",
+        "letter"
+      ]
+    },
+    {
+      "name": "Talk to people",
+      "glyph": "forum",
+      "pkgs": [
+        "signal-desktop",
+        "telegram-desktop",
+        "thunderbird"
+      ],
+      "advice": "Private messages and calls? Signal. Big groups and channels? Telegram. Email? Thunderbird.",
+      "words": [
+        "talk",
+        "chat",
+        "message",
+        "messages",
+        "call",
+        "calls",
+        "video calls",
+        "call family",
+        "email",
+        "mail",
+        "messenger"
+      ]
+    },
+    {
+      "name": "Watch films",
+      "glyph": "movie",
+      "pkgs": [
+        "vlc"
+      ],
+      "advice": "VLC plays nearly every film and music file you have.",
+      "words": [
+        "watch",
+        "film",
+        "films",
+        "movie",
+        "movies",
+        "video",
+        "videos",
+        "music",
+        "play",
+        "player",
+        "dvd"
+      ]
+    },
+    {
+      "name": "Edit videos",
+      "glyph": "movie_edit",
+      "pkgs": [
+        "kdenlive",
+        "shotwell"
+      ],
+      "advice": "Cut and arrange videos? Kdenlive.",
+      "words": [
+        "edit videos",
+        "video editor",
+        "cut video",
+        "film editing",
+        "premiere",
+        "movie maker"
+      ]
+    },
+    {
+      "name": "Record the screen",
+      "glyph": "screen_record",
+      "pkgs": [
+        "obs-studio"
+      ],
+      "advice": "OBS Studio records your screen or streams it live.",
+      "words": [
+        "record",
+        "recording",
+        "screen",
+        "stream",
+        "streaming",
+        "obs",
+        "capture"
+      ]
+    },
+    {
+      "name": "Make in 3D",
+      "glyph": "deployed_code",
+      "pkgs": [
+        "blender"
+      ],
+      "advice": "Blender models, sculpts, animates and renders.",
+      "words": [
+        "3d",
+        "model",
+        "modelling",
+        "modeling",
+        "sculpt",
+        "animate",
+        "animation",
+        "render"
+      ]
+    },
+    {
+      "name": "Make music",
+      "glyph": "music_note",
+      "pkgs": [
+        "audacity"
+      ],
+      "advice": "Record and edit sound? Audacity.",
+      "words": [
+        "audio",
+        "sound",
+        "record sound",
+        "podcast",
+        "music",
+        "edit audio"
+      ]
+    },
+    {
+      "name": "Code",
+      "glyph": "code",
+      "pkgs": [
+        "code"
+      ],
+      "advice": "The open-source build of Visual Studio Code.",
+      "words": [
+        "code",
+        "coding",
+        "program",
+        "programming",
+        "developer",
+        "editor",
+        "vscode",
+        "visual studio"
+      ]
+    }
+  ],
+  "apps": {
+    "gimp": {
+      "name": "GIMP",
+      "like": "Like Photoshop",
+      "line": "Retouch, cut out and combine pictures.",
+      "crop": [
+        0.144,
+        0.178,
+        0.625,
+        0.556
+      ]
+    },
+    "darktable": {
+      "like": "Like Lightroom",
+      "line": "Develop and sort the photos from your camera."
+    },
+    "pinta": {
+      "like": "Like Paint",
+      "line": "Crop, resize and draw on a picture, quickly."
+    },
+    "krita": {
+      "like": "For painting",
+      "line": "Draw and paint, from sketch to finished work."
+    },
+    "inkscape": {
+      "like": "Like Illustrator",
+      "line": "Logos, diagrams and drawings that stay sharp at any size."
+    },
+    "libreoffice-fresh": {
+      "like": "Like Word, Excel and PowerPoint",
+      "line": "Letters, sheets and slides, and it opens Office files.",
+      "also": [
+        "libreoffice-still"
+      ]
+    },
+    "obsidian": {
+      "like": "For notes",
+      "line": "Notes kept as plain files, linked to each other."
+    },
+    "signal-desktop": {
+      "like": "Like WhatsApp",
+      "line": "Private messages and calls."
+    },
+    "telegram-desktop": {
+      "like": "For groups",
+      "line": "Messages, groups and channels."
+    },
+    "thunderbird": {
+      "like": "Like Outlook",
+      "line": "Email, calendars and contacts."
+    },
+    "vlc": {
+      "like": "Plays everything",
+      "line": "Films and music in nearly any format."
+    },
+    "kdenlive": {
+      "like": "Like Premiere",
+      "line": "Cut and arrange videos, add titles and sound.",
+      "crop": [
+        0.3205,
+        0.209,
+        0.67,
+        0.637
+      ]
+    },
+    "shotwell": {
+      "like": "For photo albums",
+      "line": "Sort and look through your photos."
+    },
+    "obs-studio": {
+      "like": "For recording",
+      "line": "Record your screen or stream it live.",
+      "crop": [
+        0.279,
+        0.131,
+        0.442,
+        0.356
+      ]
+    },
+    "blender": {
+      "like": "For 3D",
+      "line": "Model, sculpt and animate in 3D.",
+      "crop": [
+        0.2375,
+        0.166,
+        0.45,
+        0.449
+      ]
+    },
+    "audacity": {
+      "like": "For sound",
+      "line": "Record and edit sound."
+    },
+    "code": {
+      "name": "Code",
+      "like": "Like Visual Studio Code",
+      "line": "The open-source build of Visual Studio Code."
+    }
+  },
+  "_crop": "crop = [x, y, width, height] as fractions of the app's first screenshot: the part a featured picture shows"
+}

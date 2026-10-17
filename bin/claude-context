@@ -1,0 +1,44 @@
+#!/bin/sh
+# What the focused window is, for Claude's context chips (services/Claude.qml): its app and
+# title, the folder it is in (focus-folder), the command running in a terminal, the file and
+# line open in Graphis. One JSON object on stdout; anything not known is an empty string.
+# Password managers and private browser windows give nothing at all.
+T_BIN=${TACIT_BIN:-$HOME/.local/bin}                          # Tacit's launchers (the package sets TACIT_BIN)
+TACIT_SHELL=${TACIT_SHELL:-$HOME/.config/quickshell/tacit}  # the shell's folder (the package sets TACIT_SHELL)
+w=$(hyprctl activewindow -j 2>/dev/null)
+class=$(printf %s "$w" | jq -r '.class // empty')
+title=$(printf %s "$w" | jq -r '.title // empty')
+pid=$(printf %s "$w" | jq -r '.pid // empty')
+case "$class" in
+    *[Kk]ee[Pp]ass*|*1[Pp]assword*|*[Bb]itwarden*) echo '{}'; exit 0 ;;
+esac
+case "$title" in
+    *"Private Browsing"*|*"Private browsing"*|*"Incognito"*) title="" ;;
+esac
+# Opsis (class browser) titles a private window "Private · <page>"
+[ "$class" = browser ] && case "$title" in Private|"Private · "*) title="" ;; esac
+cwd=""
+if [ "$class" = praxis ]; then
+    # Praxis: the open session's folder
+    cwd=$(qs -p "$TACIT_SHELL/claude.qml" ipc call claudeapp state 2>/dev/null | jq -r '.cwd // empty' 2>/dev/null)
+    [ -d "$cwd" ] || cwd=""
+fi
+[ -n "$cwd" ] || cwd=$("$T_BIN/focus-folder")
+cmd="" file="" line="" root=""
+case "$class" in
+    foot|footclient|kitty|Alacritty|com.mitchellh.ghostty)
+        # what the shell runs in the foreground (claude, make, nvim), not that program's helpers
+        sh=$(pgrep -P "$pid" | head -1)
+        fg=$([ -n "$sh" ] && pgrep -P "$sh" | tail -1)
+        [ -n "$fg" ] && cmd=$(cat "/proc/$fg/comm" 2>/dev/null) ;;
+    graphis)
+        # the editor has a window class of its own, so the class is the whole test
+        P="$TACIT_SHELL/code.qml"
+        root=$(qs -p "$P" ipc call code root 2>/dev/null)
+        s=$(qs -p "$P" ipc call code state 2>/dev/null)
+        file=$(printf %s "$s" | jq -r '.rel // empty' 2>/dev/null)
+        line=$(printf %s "$s" | jq -r '.line // empty' 2>/dev/null) ;;
+esac
+jq -nc --arg class "$class" --arg title "$title" --arg cwd "$cwd" --arg cmd "$cmd" \
+    --arg root "$root" --arg file "$file" --arg line "$line" \
+    '{class: $class, title: $title, cwd: $cwd, cmd: $cmd, root: $root, file: $file, line: $line}'

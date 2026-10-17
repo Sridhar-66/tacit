@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Pinax
+GenericName=File Manager
+Comment=The desktop's own file window
+Keywords=files;folders;file manager;browse;directory;pinax;
+Exec=files-open %f
+Icon=folder
+Terminal=false
+# The window belongs to the shell instance, so it carries the shell's class.
+StartupWMClass=org.quickshell
+NoDisplay=false
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;
+StartupNotify=false

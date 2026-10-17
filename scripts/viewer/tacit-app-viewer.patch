@@ -1,0 +1,30 @@
+--- /home/abdul/.local/bin/tacit-app	2026-09-28 22:23:59.931239593 +0200
++++ /home/abdul/.cache/tacit-viewer/v1/tacit-app.new	2026-10-04 05:04:59.529638255 +0200
+@@ -22,6 +22,9 @@
+ 	graphis)
+ 		qml="$HOME/.config/quickshell/tacit/code.qml"; target=code
+ 		log="$HOME/.cache/code.log"; lock=code-app; shown=Graphis ;;
++	viewer)
++		qml="$HOME/.config/quickshell/tacit/viewer.qml"; target=viewer
++		log="$HOME/.cache/viewer.log"; lock=viewer-app; shown=Viewer ;;
+ 	*)
+ 		echo "tacit-app: no app called '$1'" >&2; exit 2 ;;
+ 	esac
+@@ -31,7 +34,7 @@
+ up() { qs -p "$qml" ipc call "$target" state >/dev/null 2>&1; }
+ 
+ cmd=${1:-}
+-[ $# -ge 2 ] || { echo "tacit-app: ensure|call|focus <praxis|graphis>" >&2; exit 2; }
++[ $# -ge 2 ] || { echo "tacit-app: ensure|call|focus <praxis|graphis|viewer>" >&2; exit 2; }
+ app_paths "$2"
+ 
+ case "$cmd" in
+@@ -83,7 +86,7 @@
+ 	exit 0
+ 	;;
+ *)
+-	echo "tacit-app: ensure|call|focus <praxis|graphis>" >&2
++	echo "tacit-app: ensure|call|focus <praxis|graphis|viewer>" >&2
+ 	exit 2
+ 	;;
+ esac

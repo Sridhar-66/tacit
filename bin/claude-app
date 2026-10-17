@@ -1,0 +1,5 @@
+#!/bin/sh
+# The Claude app: agent sessions, running and past (~/.config/quickshell/tacit/claude.qml).
+# One instance: claude-hand starts it if needed, otherwise shows and focuses the one running.
+T_BIN=${TACIT_BIN:-$HOME/.local/bin}                          # Tacit's launchers (the package sets TACIT_BIN)
+exec "$T_BIN/claude-hand" show

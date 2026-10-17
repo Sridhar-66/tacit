@@ -1,0 +1,22 @@
+[Unit]
+Description=Flow: dictation for the whole desktop (hold the key, speak, release)
+After=tacit-session.target pipewire.service
+PartOf=tacit-session.target
+# No start limit: five fast exec failures inside ten seconds (systemd's default burst) left Flow
+# in a failed state for the rest of the session, and its key silently dead.
+StartLimitIntervalSec=0
+# So the unit never reaches `failed` from a crash loop and OnFailure below cannot fire for one:
+# a flowd that keeps dying shows up as the key saying "Flow isn't running", and the shell starts
+# it again on demand (services/Dictation.qml).
+OnFailure=tacit-daemon-failed@%n.service
+
+[Service]
+ExecStart=%h/.local/bin/flowd
+Restart=always
+RestartSec=5
+# a small daemon: keep it out of the way of the desktop under memory pressure
+MemoryHigh=300M
+Nice=-2
+
+[Install]
+WantedBy=tacit-session.target
