@@ -603,7 +603,7 @@ ApplicationWindow {
     function startPick(folder, label, images, done) {
         root.pickDone = done;
         root.pickImages = images;
-        Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "files", "pick",
+        Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "files", "pick",
             folder || Quickshell.env("HOME"), root.selfPath, "settingsApp", label]);
     }
     function pickFile(label, folder, done) {
@@ -808,7 +808,7 @@ ApplicationWindow {
                 ? Config.options.background.thumbnailPath : look.wallPath
             property bool showAll: false
             function apply(path) {
-                Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "wallpapers", "apply", path]);
+                Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "wallpapers", "apply", path]);
             }
             FolderListModel {
                 id: wallFiles
@@ -2321,7 +2321,7 @@ ApplicationWindow {
             Process {
                 id: readSilent
                 running: true
-                command: ["qs", "-c", "tacit", "ipc", "call", "notifications", "silent"]
+                command: ["qs", "-p", Directories.shellFile, "ipc", "call", "notifications", "silent"]
                 stdout: SplitParser { onRead: data => np.silent = data.trim() === "true" }
             }
             Timer {
@@ -2338,7 +2338,7 @@ ApplicationWindow {
                     checked: np.silent
                     onToggled: value => {
                         np.silent = value;
-                        Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "notifications", "setSilent", value ? "true" : "false"]);
+                        Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "notifications", "setSilent", value ? "true" : "false"]);
                     }
                 }
             }
@@ -3755,7 +3755,7 @@ ApplicationWindow {
 
             function setNight(on) {
                 dp.nightOn = on;
-                Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "nightLight", "set", on ? "true" : "false"]);
+                Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "nightLight", "set", on ? "true" : "false"]);
                 nightCheck.restart();
             }
             function scaleOptions(m) {
@@ -3797,7 +3797,7 @@ ApplicationWindow {
             Timer {
                 id: brightnessWrite
                 interval: 120
-                onTriggered: Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "brightness", "set", String(dp.wantBrightness)])
+                onTriggered: Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "brightness", "set", String(dp.wantBrightness)])
             }
             Timer {
                 id: nightCheck
@@ -3806,7 +3806,7 @@ ApplicationWindow {
             }
             Process {
                 id: readBrightness
-                command: ["qs", "-c", "tacit", "ipc", "call", "brightness", "get"]
+                command: ["qs", "-p", Directories.shellFile, "ipc", "call", "brightness", "get"]
                 stdout: SplitParser {
                     onRead: data => {
                         const v = parseFloat(data);
@@ -3817,7 +3817,7 @@ ApplicationWindow {
             }
             Process {
                 id: readNight
-                command: ["qs", "-c", "tacit", "ipc", "call", "nightLight", "active"]
+                command: ["qs", "-p", Directories.shellFile, "ipc", "call", "nightLight", "active"]
                 stdout: SplitParser { onRead: data => dp.nightOn = data.trim() === "true" }
             }
             Process {
@@ -4635,7 +4635,8 @@ ApplicationWindow {
                     visible: updatesGroup.state.count !== undefined
                     clickable: false
                     glyph: "system_update"
-                    label: !(updatesGroup.state.count > 0) ? "Tacit is up to date"
+                    label: Updates.lastCheckFailed ? "Couldn't check for updates"
+                        : !(updatesGroup.state.count > 0) ? "Tacit is up to date"
                         : updatesGroup.state.ready ? (updatesGroup.state.tacitVersion ? `Tacit ${updatesGroup.state.tacitVersion} is ready` : "Updates are ready")
                         : "Updates are on their way"
                     description: updatesGroup.tonight ? "Tonight, on the charger"
@@ -4656,6 +4657,15 @@ ApplicationWindow {
                             onPressed: Quickshell.execDetached(["bash", "-c", "systemctl start tacit-update@now.service && systemctl reboot"])
                         }
                     }
+                }
+                SettingRow {
+                    visible: Updates.available
+                    glyph: "refresh"
+                    label: "Check for updates"
+                    description: Updates.checking ? "Looking now"
+                        : Updates.lastCheckFailed ? "The last check didn't work"
+                        : "Now, instead of at the next look"
+                    onActivated: Updates.checkNow()
                 }
                 SwitchRow {
                     label: "Say when updates are ready"

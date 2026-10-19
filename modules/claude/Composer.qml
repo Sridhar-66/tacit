@@ -311,9 +311,9 @@ Item {
         input.forceActiveFocus();
     }
     function browse() {
-        Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "files", "pick",
+        Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "files", "pick",
             composer.folder.startsWith("/") ? composer.folder : Quickshell.env("HOME"),
-            `${Quickshell.env("HOME")}/.config/quickshell/tacit/claude.qml`, "claudeapp", "Attach to Claude"]);
+            FileUtils.trimFileProtocol(Quickshell.shellPath("claude.qml")), "claudeapp", "Attach to Claude"]);
     }
 
     // ── @ files and / commands ─────────────────────────────────────────────

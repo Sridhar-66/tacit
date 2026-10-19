@@ -16,7 +16,8 @@ Singleton {
     id: root
 
     property bool available: true
-    property alias checking: waitingProc.running
+    // A read or a check in progress (the two Processes below set it; a binding to them here read as undefined on reload)
+    property bool checking: false
     property int count: 0
     property bool downloaded: false
     // Tacit's own new version when it is among them ("" when only other parts change)
@@ -32,8 +33,14 @@ Singleton {
 
     function load() {}
     function refresh() {
-        if (!waitingProc.running)
+        if (!waitingProc.running && !fetchProc.running)
             waitingProc.running = true;
+    }
+    // Check now is the download too: the package list is otherwise only as fresh as the last timer run, so a check
+    // could not find a release published an hour ago.
+    function checkNow() {
+        if (root.available && !fetchProc.running)
+            fetchProc.running = true;
     }
     // the next start installs them; no password (50-tacit-updates.rules)
     function restartNow() {
@@ -91,6 +98,22 @@ Singleton {
                     root.announce(waiting.join("\n"));
             }
         }
+        onRunningChanged: root.checking = waitingProc.running || fetchProc.running
+    }
+
+    // What the timer runs, now: refresh the list and download what is waiting, never install (no password: the polkit
+    // rule allows wheel to start it). A start that fails says so, instead of reading the old list as "up to date".
+    Process {
+        id: fetchProc
+        command: ["systemctl", "start", "tacit-fetch-updates.service"]
+        onExited: (code, status) => {
+            if (code !== 0) {
+                root.lastCheckFailed = true;
+                return;
+            }
+            root.refresh();
+        }
+        onRunningChanged: root.checking = waitingProc.running || fetchProc.running
     }
 
     // said once for each set of waiting updates

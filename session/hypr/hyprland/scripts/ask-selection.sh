@@ -7,4 +7,4 @@ if [ ! -s "$f" ]; then
 	rm -f "$f"
 	exit 0
 fi
-exec qs -c "${qsConfig:-tacit}" ipc call island askWith "$f"
+exec qs -p "${TACIT_SHELL:-$HOME/.config/quickshell/tacit}" ipc call island askWith "$f"

@@ -44,7 +44,7 @@ Singleton {
 
     function lock() {
         if (WM.compositor === "niri") {
-            Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "lock", "activate"]);
+            Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "lock", "activate"]);
         } else {
             Quickshell.execDetached(["loginctl", "lock-session"]);
         }

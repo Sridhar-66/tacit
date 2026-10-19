@@ -1,9 +1,9 @@
 [Unit]
-Description=Tacit: look for updates every few hours and download them
+Description=Tacit: look for updates every two hours and download them
 
 [Timer]
 OnBootSec=20min
-OnUnitActiveSec=6h
+OnUnitActiveSec=2h
 RandomizedDelaySec=20min
 Persistent=true
 

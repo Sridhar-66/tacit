@@ -184,7 +184,7 @@ Item {
                 tip: pane.follow ? "Following Claude's edits" : "Follow Claude's edits"
                 onClicked: pane.setFollow(!pane.follow)
             }
-            Act { visible: pane.active.length > 0; text: "folder_open"; tip: "Show in Files"; onClicked: Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "files", "reveal", pane.active]) }
+            Act { visible: pane.active.length > 0; text: "folder_open"; tip: "Show in Files"; onClicked: Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "files", "reveal", pane.active]) }
             Act { visible: pane.active.length > 0; text: "open_in_new"; tip: "Open in Graphis"; onClicked: pane.openInCode(pane.active, 0) }
             Act { text: "close"; iconSize: 18; tip: "Close (Ctrl+Alt+B)"; onClicked: pane.closeRequested() }
         }

@@ -482,7 +482,7 @@ ApplicationWindow {
         const abs = project.root + (row ? "/" + row.path : "");
         items.push(
             { label: "Copy Path", line: true, run: () => Quickshell.clipboardText = abs },
-            { label: "Show in Files", run: () => Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "files", "reveal", abs]) });
+            { label: "Show in Files", run: () => Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "files", "reveal", abs]) });
         const at = tree.mapToItem(menu, x, y);
         menu.open(at.x, at.y, items);
     }
@@ -881,7 +881,7 @@ ApplicationWindow {
                             enabled: root.cur !== null
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "files", "reveal", project.root + "/" + root.docs[root.current].rel])
+                            onClicked: Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "files", "reveal", project.root + "/" + root.docs[root.current].rel])
                         }
                         StyledToolTip { text: "Show in Files"; extraVisibleCondition: whichArea.containsMouse && root.cur !== null }
                     }

@@ -5,7 +5,8 @@
 #                                                 shrinking Windows to N bytes (keep: null uses free room only)
 #        {"answers": {name, password, language, layout}}   the person, whenever Setup has them (the install waits for
 #                                                 them only at its last step); the password never reaches a log
-#   out: {"state": "running", "done": 0.42, "step": "copying"}, then {"state": "done"} or
+#   out: {"state": "running", "done": 0.42, "step": "copying"}, then {"state": "done"} ("other": "Windows" when Windows on
+#        another disk can still be chosen at start) or
 #        {"state": "failed", "reason": "...", "untouched": true|false}  (untouched: nothing on the disk was changed yet)
 # Next to another system: Windows (NTFS) is shrunk with ntfsresize and its partition entry with sfdisk, keeping its
 # identity; Tacit gets a boot partition (XBOOTLDR, 1 GiB, FAT) and its own (ext4) in the free room, and systemd-boot goes
@@ -52,6 +53,36 @@ def chroot(*cmd, inp=None):
     return sh("arch-chroot", TARGET, *cmd, inp=inp)
 
 
+def boot_entry(disk, efi, suffix):
+    """The firmware's own entry for Tacit, and its place in the boot order. bootctl writes one, but it treats its own
+    failure to write EFI variables as a warning and still reports success in a chroot ("Running in a chroot, enabling
+    --graceful."): the files and the partitions appear, the entry does not, and the computer starts Windows only. The
+    first person to hit this fixed it by hand with efibootmgr (2026-10-18), so the entry is read back from the live
+    system, where the firmware's variables are, and made when it is missing; Tacit is kept first in the boot order, as
+    Setup promises, so the computer starts Tacit and Windows is a Space keypress away. Windows's own entry names this
+    same EFI partition, so the entry looked for is one that starts systemd-boot on it (bootctl's, or the one made
+    here)."""
+    loader = f"\\EFI\\systemd\\systemd-boot{suffix}.efi"
+    guid = sh("blkid", "-s", "PARTUUID", "-o", "value", efi).strip().lower()
+
+    def entry():
+        return next((line for line in sh("efibootmgr", "-v").splitlines()
+                     if guid and guid in line.lower() and loader.lower() in line.lower()), "")
+
+    found = entry()
+    if not found:
+        number = int(re.search(r"(\d+)$", efi).group(1))
+        sh("efibootmgr", "--create", "--disk", disk, "--part", str(number), "--label", "Tacit",
+           "--loader", loader, "--unicode")
+        found = entry()
+        if not found:
+            raise Refused("the firmware did not take Tacit's boot entry")
+    boot = re.match(r"Boot([0-9A-Fa-f]{4})", found.strip()).group(1).lower()
+    order = re.search(r"(?im)^BootOrder:\s*([0-9A-Fa-f,]+)", sh("efibootmgr", "-v"))
+    if order and order.group(1).split(",")[0].lower() != boot:
+        sh("efibootmgr", "--bootorder", ",".join([boot] + [n for n in order.group(1).split(",") if n.lower() != boot]))
+
+
 def partitions(disk):
     out = sh("lsblk", "-nrpo", "NAME,TYPE", disk)
     return [l.split()[0] for l in out.splitlines() if l.split()[1:] == ["part"]]
@@ -60,6 +91,12 @@ def partitions(disk):
 def check(disk):
     if not os.path.isdir("/run/archiso"):
         raise Refused("this is not Tacit's live system")
+    # without the firmware's own interfaces (the stick started in legacy mode) the start-up entry cannot be written,
+    # and the result is a computer that starts Windows and never Tacit: refuse before the disk is changed at all,
+    # and check the variables really are readable as well as present
+    if not os.path.isdir("/sys/firmware/efi/efivars"):
+        raise Refused("this computer started the stick without UEFI, so Tacit's start-up entry cannot be written; start the stick again from the UEFI boot menu")
+    sh("efibootmgr", "-v")
     if not re.fullmatch(r"/dev/(nvme\d+n\d+|[sv]d[a-z]+|mmcblk\d+)", disk or ""):
         raise Refused(f"not a whole disk: {disk}")
     info = json.loads(sh("lsblk", "-J", "-b", "-o", "NAME,TYPE,MOUNTPOINTS,SIZE", disk))["blockdevices"][0]
@@ -171,6 +208,33 @@ def image():
     return found[0]
 
 
+def windows_elsewhere(disk):
+    """Instead, on a disk of its own while Windows is on another (Setup's disk list, 2026-10-18): Windows's loader copied
+    from that disk's EFI partition into Tacit's, where systemd-boot lists it by itself, so holding Space still shows
+    Windows. Its boot data names Windows's partition by that partition's own id, so it starts from this copy. True when
+    copied; a failure here never stops the install."""
+    mnt = "/mnt/tacit-other-efi"
+    try:
+        for d in json.loads(sh("lsblk", "-J", "-p", "-o", "NAME,TYPE,PARTTYPE"))["blockdevices"]:
+            if d["name"] == disk or d.get("type") != "disk":
+                continue
+            for p in d.get("children") or []:
+                if (p.get("parttype") or "").lower() != ESP:
+                    continue
+                os.makedirs(mnt, exist_ok=True)
+                if subprocess.run(["mount", "-o", "ro", p["name"], mnt], capture_output=True).returncode != 0:
+                    continue
+                try:
+                    if os.path.isfile(f"{mnt}/EFI/Microsoft/Boot/bootmgfw.efi"):
+                        shutil.copytree(f"{mnt}/EFI/Microsoft", f"{TARGET}/boot/EFI/Microsoft", dirs_exist_ok=True)
+                        return True
+                finally:
+                    subprocess.run(["umount", mnt], capture_output=True)
+    except (Refused, OSError, ValueError, KeyError):
+        pass
+    return False
+
+
 def install(disk, place, keep):
     check(disk)
     sfs = image()
@@ -187,6 +251,11 @@ def install(disk, place, keep):
         for where, dev in (("boot", boot), ("efi", efi)):
             os.makedirs(f"{TARGET}/{where}", exist_ok=True)
             sh("mount", "-o", "fmask=0077,dmask=0077", dev, f"{TARGET}/{where}")
+            # a mount that quietly did not happen would leave bootctl and the images writing to the root filesystem,
+            # so each one is read back
+            mounted = sh("findmnt", "-nro", "SOURCE", "--target", f"{TARGET}/{where}").strip()
+            if os.path.realpath(mounted) != os.path.realpath(dev):
+                raise Refused(f"{TARGET}/{where} is not mounted from {dev}")
     else:
         # from here the disk is changed
         state["touched"] = True
@@ -202,6 +271,9 @@ def install(disk, place, keep):
         sh("mount", root, TARGET)
         os.makedirs(f"{TARGET}/boot", exist_ok=True)
         sh("mount", "-o", "fmask=0077,dmask=0077", efi, f"{TARGET}/boot")
+        mounted = sh("findmnt", "-nro", "SOURCE", "--target", f"{TARGET}/boot").strip()
+        if os.path.realpath(mounted) != os.path.realpath(efi):
+            raise Refused(f"{TARGET}/boot is not mounted from {efi}")
     progress(0.05, "copying")
 
     # the live system's image, as it ran: unsquashfs says how far it is in percent
@@ -255,10 +327,17 @@ def install(disk, place, keep):
     progress(0.80, "starting")
     chroot("mkinitcpio", "-P")
     progress(0.88, "starting")
-    if place == "next":
-        chroot("bootctl", "install", "--esp-path=/efi", "--boot-path=/boot")
-    else:
-        chroot("bootctl", "install", "--esp-path=/boot")
+    # outside arch-chroot: there bootctl turns the failure to write the firmware's variables into a warning and
+    # reports success, which is how a computer ends up starting Windows only
+    esp = "/efi" if place == "next" else "/boot"
+    sh("bootctl", f"--root={TARGET}", f"--esp-path={esp}", "--boot-path=/boot", "install")
+    suffix = {"x86_64": "x64", "aarch64": "aa64"}.get(os.uname().machine)
+    if not suffix:
+        raise Refused(f"this computer's UEFI ({os.uname().machine}) is not one Tacit knows")
+    for path in (f"{TARGET}{esp}/EFI/systemd/systemd-boot{suffix}.efi", f"{TARGET}{esp}/EFI/BOOT/BOOT{suffix.upper()}.EFI"):
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            raise Refused(f"bootctl did not install the UEFI loader at {path}")
+    boot_entry(disk, efi, suffix)
     partuuid = sh("blkid", "-s", "PARTUUID", "-o", "value", root).strip()
     resume = f" resume=PARTUUID={partuuid} resume_offset={offset}" if offset is not None else ""
     os.makedirs(f"{TARGET}/boot/loader/entries", exist_ok=True)
@@ -277,6 +356,8 @@ def install(disk, place, keep):
             os.makedirs(f"{TARGET}/efi/loader/entries", exist_ok=True)
             with open(f"{TARGET}/efi/loader/entries/{vendor}.conf", "w") as f:
                 f.write(f"title {vendor[:1].upper() + vendor[1:]}\nefi /EFI/{vendor}/{os.path.basename(path)}\n")
+    if place == "instead" and windows_elsewhere(disk):
+        state["other"] = "Windows"
     progress(0.92, "keys")
     chroot("pacman-key", "--init")
     chroot("pacman-key", "--populate", "archlinux", "tacit")
@@ -417,7 +498,7 @@ def main():
             answers = json.loads(line).get("answers")
         account(answers)
         finish()
-        say({"state": "done", "done": 1.0})
+        say(dict({"state": "done", "done": 1.0}, **({"other": state["other"]} if state.get("other") else {})))
     except Exception as e:
         reason = str(e) if isinstance(e, Refused) else f"{type(e).__name__}: {e}"
         subprocess.run(["umount", "-R", TARGET], capture_output=True)

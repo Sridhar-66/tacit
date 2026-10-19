@@ -8,6 +8,7 @@
 # joins no network and creates no account.
 #
 # TACIT_SETUP_SCENARIO=windows|bitlocker|asleep|full|empty|linux|linuxroom  shows a disk case this computer does not have
+#                     two                                   two disks: Windows on one, the other empty
 # TACIT_SETUP_FAIL=1                                        the practice install stops at 60 %
 # TACIT_SETUP_SECONDS=90                                    how long the practice install takes
 import json, os, re, select, subprocess, sys, threading, time
@@ -138,22 +139,36 @@ def layout(name, parts):
             out.update(used=int(m.group(1)), winSize=win["size"])
     return out
 
-def disks():
-    """The disk Tacit would go on, and what is on it. Never the stick setup runs from."""
+# the disk picked in Setup's disk list (op "disk"); None until then
+chosen = {"name": None}
+
+def all_disks():
+    """Every disk inside this computer, each with what is on it. Never the stick setup runs from, nor any USB disk."""
     if SCENARIO:
-        return fake_disk(SCENARIO)
+        return fake_disks(SCENARIO)
     try:
         d = json.loads(run("lsblk", "-J", "-b", "-o", "NAME,SIZE,TYPE,FSTYPE,LABEL,MODEL,TRAN,RM,MOUNTPOINTS"))
     except ValueError:
+        return []
+    # the stick itself, however it is attached (a card reader, a VM's disk): the disk under the live system's boot files
+    src = run("findmnt", "-nro", "SOURCE", "/run/archiso/bootmnt").strip()
+    stick = run("lsblk", "-nrso", "NAME", src).split()[-1:] if src else []
+    return [describe(b) for b in d.get("blockdevices", [])
+            if b.get("type") == "disk" and not b.get("rm") and b.get("tran") != "usb" and not b["name"].startswith(("zram", "loop"))
+            and b["name"] not in stick]
+
+def disks():
+    """The disk Tacit would go on: the one picked, else an empty one (nothing to lose), else the biggest. It was always
+    the biggest, with no choice: with Windows on a big disk and an empty one beside it, Tacit went next to Windows or
+    erased it (a Reddit reader, 2026-10-18)."""
+    ds = all_disks()
+    if not ds:
         return {"case": "none"}
-    best = None
-    for b in d.get("blockdevices", []):
-        if b.get("type") != "disk" or b.get("rm") or b.get("tran") == "usb" or b["name"].startswith(("zram", "loop")):
-            continue
-        if best is None or b["size"] > best["size"]:
-            best = b
-    if best is None:
-        return {"case": "none"}
+    picked = next((d for d in ds if d["name"] == chosen["name"]), None)
+    empty = [d for d in ds if d["case"] == "empty" and d["size"] >= MIN_TACIT]
+    return picked or max(empty or ds, key=lambda d: d["size"])
+
+def describe(best):
     parts = best.get("children", [])
     fs = [p.get("fstype") or "" for p in parts]
     disk = {"name": "/dev/" + best["name"], "model": (best.get("model") or "").strip() or "this disk", "size": best["size"]}
@@ -166,6 +181,12 @@ def disks():
     if any(f in ("ext4", "btrfs", "xfs", "f2fs") for f in fs):
         return dict(disk, case="linux", **room)
     return dict(disk, case="empty" if not parts else "other", **room)
+
+def fake_disks(case):
+    if case == "two":
+        return [dict(fake_disk("windows"), name="/dev/sda", model="Seagate Barracuda", size=1000 * GB, winSize=998 * GB),
+                fake_disk("empty")]
+    return [fake_disk(case)]
 
 def fake_disk(case):
     disk = {"name": "/dev/nvme0n1", "model": "Samsung SSD", "size": 512 * GB, "fake": True, "gpt": True, "esp": True, "free": 0}
@@ -251,7 +272,7 @@ def real_install(disk, place, keep):
         done = m.get("done", 0)
         # time left from the pace so far, once there is a pace to go by
         left = None if time.time() - t0 < 15 or done <= 0.02 else round((time.time() - t0) * (1 - done) / done)
-        ev = {"ev": "install", "state": m["state"], "done": done, "left": left}
+        ev = {"ev": "install", "state": m["state"], "done": done, "left": left, "other": m.get("other")}
         if m["state"] == "failed":
             # the installer's own reasons are plain words ("the disk is smaller than 32 GB"); a tool's failure ("sgdisk failed:
             # ...") is plumbing, shown as nothing more than "didn't finish" and kept in /tmp/tacit-install.log
@@ -278,10 +299,18 @@ def act(req):
         if REAL:
             threading.Thread(target=find_zone, daemon=True).start()
         d = disks()
-        emit({"ev": "hello", "practice": not REAL, "languages": [{"code": c, "name": n, "layout": k, "rtl": c in RTL} for c, n, k in LANGUAGES],
+        # the disk list only where there is a choice to make
+        many = all_disks()
+        listed = [dict(x, plan=plan(x)) for x in many] if len(many) > 1 else []
+        emit({"ev": "hello", "practice": not REAL, "disks": listed, "languages": [{"code": c, "name": n, "layout": k, "rtl": c in RTL} for c, n, k in LANGUAGES],
               "layouts": layouts(), "wifi": wifi(), "wired": wired(), "disk": d, "plan": plan(d), "power": power(), "scenario": SCENARIO})
     elif op == "wifi":
         emit({"ev": "wifi", "wifi": wifi(), "wired": wired()})
+    elif op == "disk":
+        if not install["running"]:
+            chosen["name"] = req.get("name")
+        d = disks()
+        emit({"ev": "disk", "disk": d, "plan": plan(d)})
     elif op == "power":
         emit({"ev": "power", "power": power()})
     elif op == "join":

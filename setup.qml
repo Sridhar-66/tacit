@@ -52,6 +52,7 @@ ApplicationWindow {
         property var wifi: []
         property var disk: ({})
         property var plan: null
+        property var disks: []          // every disk inside, when there is more than one to choose from
         property var power: ({ ac: true })
         property string scenario: ""
         property bool ready: false
@@ -71,12 +72,14 @@ ApplicationWindow {
         if (m.ev === "hello") {
             backend.languages = m.languages; backend.layouts = m.layouts; backend.wifi = m.wifi; backend.wired = m.wired === true;
             backend.disk = m.disk; backend.plan = m.plan; backend.power = m.power; backend.scenario = m.scenario;
+            backend.disks = m.disks ?? [];
             backend.practice = m.practice !== false;
             backend.ready = true;
             if (setup.language === "") { setup.language = m.languages[0].code; setup.layout = m.languages[0].layout; }
             const here = m.wifi.find(w => w.inUse);
             if (here) setup.network = here.ssid;
         } else if (m.ev === "wifi") { backend.wifi = m.wifi; backend.wired = m.wired === true; }
+        else if (m.ev === "disk") { backend.disk = m.disk; backend.plan = m.plan; setup.place = "next"; }
         else if (m.ev === "power") backend.power = m.power;
         else if (m.ev === "join") {
             setup.joining = false;
@@ -84,6 +87,7 @@ ApplicationWindow {
             else setup.joinError = "That password didn't work. Check it and try again.";
         } else if (m.ev === "install") {
             setup.installDone = m.done; setup.installLeft = m.left ?? -1; setup.installState = m.state;
+            if (m.other) setup.otherSystem = m.other;
             if (m.state === "failed") setup.installUntouched = m.untouched !== false;
             if (m.state === "failed") setup.installReason = m.reason ?? "";
             if (m.state === "failed") setup.go("failed");
@@ -109,6 +113,7 @@ ApplicationWindow {
         property bool joining: false
         property string joinError: ""
         property string place: "next"          // next | instead
+        property string otherSystem: ""        // Windows on another disk, still chosen with Space (tacit-install)
         property string picture: "dune"
         property bool reports: false
         property real installDone: 0
@@ -125,7 +130,7 @@ ApplicationWindow {
         readonly property var lang: backend.languages.find(l => l.code === language) ?? null
         readonly property var layoutName: (backend.layouts.find(l => l.code === layout) ?? { name: layout }).name
     }
-    readonly property int step: ({ welcome: 1, languages: 1, keyboards: 1, wifi: 2, where: 3, erase: 3, you: 4, privacy: 5, almost: 6, ready: 7, failed: 3 })[setup.page] ?? 1
+    readonly property int step: ({ welcome: 1, languages: 1, keyboards: 1, wifi: 2, where: 3, disks: 3, erase: 3, you: 4, privacy: 5, almost: 6, ready: 7, failed: 3 })[setup.page] ?? 1
 
     // a page switch: the new words come in where the old ones were, rising a little
     property string shownPage: "welcome"
@@ -330,6 +335,7 @@ ApplicationWindow {
                             : parent.c === "windows" && backend.plan ? `This computer has Windows on its ${parent.size} disk, with ${Math.round(backend.disk.used / 1e9)} GB in use.`
                             : parent.c === "windows" ? `This computer has Windows on its ${parent.size} disk.`
                             : parent.c === "linux" ? `This computer has Linux on its ${parent.size} disk.`
+                            : parent.c === "empty" && root.windowsElsewhere ? `This ${parent.size} disk is empty. Windows, on the other disk, stays as it is.`
                             : parent.c === "empty" ? `This computer's ${parent.size} disk is empty.`
                             : parent.c === "none" ? "Tacit found no disk inside this computer. The USB stick it runs from can't be used."
                             : `This computer's disk is ${parent.size}.`
@@ -362,6 +368,38 @@ ApplicationWindow {
                             horizontalAlignment: parent.parent.c === "empty" ? Text.AlignHCenter : Text.AlignLeft
                             text: "Plug in the charger. Installing takes about 10 minutes."
                             font.pixelSize: Look.fs(17); color: Look.sec
+                        }
+                    }
+
+                    // with more than one disk inside: which one, as the first page names the keyboard
+                    Link { visible: backend.disks.length > 1; x: (parent.width - width) / 2; y: Look.px(646); bright: true
+                        text: `Disk: ${root.diskName(backend.disk)}  ›`; onClicked: setup.go("disks") }
+                }
+
+                // ── the disks inside, to choose from (Setup took the biggest until 2026-10-18)
+                Item {
+                    visible: root.shownPage === "disks"
+                    anchors.fill: parent
+                    Headline { text: "Choose a disk." }
+                    Sentence { text: "Tacit goes on the one you choose. Nothing changes until you install." }
+                    Column {
+                        x: (parent.width - width) / 2; y: Look.px(352); width: Look.px(600)
+                        Repeater {
+                            model: backend.disks
+                            delegate: Item {
+                                id: dr
+                                required property var modelData
+                                readonly property bool on: modelData.name === backend.disk.name
+                                width: Look.px(600); height: Look.px(56)
+                                activeFocusOnTab: true
+                                Keys.onReturnPressed: root.pickDisk(modelData)
+                                T { x: Look.px(44); anchors.verticalCenter: parent.verticalCenter; text: root.diskName(dr.modelData); font.pixelSize: Look.fs(21)
+                                    font.weight: dr.on || dr.activeFocus ? Font.Medium : Font.Normal; color: dr.on || dr.activeFocus || dma.containsMouse ? Look.main : Look.meta }
+                                T { anchors.right: parent.right; anchors.rightMargin: Look.px(20); anchors.verticalCenter: parent.verticalCenter
+                                    text: root.diskHolds(dr.modelData); font.pixelSize: Look.fs(16); color: Look.sec }
+                                Rectangle { visible: dr.on; anchors.verticalCenter: parent.verticalCenter; x: Look.px(6); width: Look.px(10); height: width; radius: width / 2; color: Look.light }
+                                MouseArea { id: dma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.pickDisk(dr.modelData) }
+                            }
                         }
                     }
                 }
@@ -434,7 +472,8 @@ ApplicationWindow {
                     }
                     Sentence {
                         text: root.shownPage === "almost" ? "Tacit is finishing on its own. Keep the computer on and the USB stick in."
-                            : root.shownPage === "ready" ? ("Restart now. When the screen goes dark, take out the USB stick." + (setup.place === "next" && root.other !== "it" ? ` To use ${root.other}, hold the Space bar while the computer starts.` : ""))
+                            : root.shownPage === "ready" ? ("Restart now. When the screen goes dark, take out the USB stick." + (setup.place === "next" && root.other !== "it" ? ` To use ${root.other}, hold the Space bar while the computer starts.`
+                                                                                                                                : setup.otherSystem !== "" ? ` To use ${setup.otherSystem}, hold the Space bar while the computer starts.` : ""))
                             : setup.installUntouched ? "Nothing on the disk was changed, so the computer starts as before. You can try again."
                             : setup.place === "next" ? `Tacit stopped partway. ${root.other === "it" ? "What was on the disk" : root.other} should start as before${root.other === "Windows" ? ", after it checks its disk" : ""}. You can try again.`
                             : "Tacit stopped partway, after the disk was erased. You can try again."
@@ -446,7 +485,7 @@ ApplicationWindow {
             // main action alone at the centre left the pair off it, 2026-10-17)
             Act {
                 id: primary
-                visible: root.shownPage !== "almost" && root.shownPage !== "privacy" && root.shownPage !== "languages" && root.shownPage !== "keyboards"
+                visible: root.shownPage !== "almost" && root.shownPage !== "privacy" && root.shownPage !== "languages" && root.shownPage !== "keyboards" && root.shownPage !== "disks"
                 x: (stage.width - width + (otherWay.visible ? otherWay.width + Look.px(18) : 0)) / 2; y: Look.px(720)
                 text: root.primaryText
                 later: root.primaryLater
@@ -460,7 +499,7 @@ ApplicationWindow {
                 onClicked: root.shownPage === "wifi" ? setup.go("where") : setup.back()
             }
             Quiet {
-                visible: root.shownPage === "languages" || root.shownPage === "keyboards"
+                visible: root.shownPage === "languages" || root.shownPage === "keyboards" || root.shownPage === "disks"
                 x: (stage.width - width) / 2; y: Look.px(724)
                 text: "Back"
                 onClicked: setup.back()
@@ -563,6 +602,17 @@ ApplicationWindow {
         setup.back();
     }
     function pickNetwork(n) { setup.network = n.ssid; setup.joinError = ""; }
+    // a disk in words: its name and size, and what is on it
+    function diskName(d) { return `${d.model ?? "Disk"} · ${Math.round((d.size ?? 0) / 1e9)} GB`; }
+    function diskHolds(d) {
+        return ({ windows: "Windows", asleep: "Windows", bitlocker: "Windows, with BitLocker", linux: "Linux", empty: "Empty" })[d.case] ?? "Other files";
+    }
+    readonly property bool windowsElsewhere: backend.disks.some(d => d.name !== backend.disk.name && ["windows", "asleep", "bitlocker"].includes(d.case))
+    function pickDisk(d) {
+        backend.disk = d; backend.plan = d.plan; setup.place = "next";
+        backend.send({ op: "disk", name: d.name });
+        setup.back();
+    }
     function forward() {
         switch (shownPage) {
         case "welcome": setup.go("wifi"); break;
@@ -626,7 +676,7 @@ ApplicationWindow {
     // ── render harness: TACIT_SETUP_RENDER=<dir> draws each page once and saves it
     readonly property string renderDir: Quickshell.env("TACIT_SETUP_RENDER") ?? ""
     property var shots: [["1-welcome", "welcome"], ["1b-languages", "languages"], ["1c-keyboards", "keyboards"], ["2-internet", "wifi"],
-                         ["3-where", "where"], ["3b-erase", "erase"], ["4-you", "you"], ["5-privacy", "privacy"], ["6-almost", "almost"],
+                         ["3-where", "where"], ["3c-disks", "disks"], ["3b-erase", "erase"], ["4-you", "you"], ["5-privacy", "privacy"], ["6-almost", "almost"],
                          ["7-ready", "ready"], ["8-failed", "failed"]]
     property int si: -1
     Timer { id: quitLater; interval: 1500; onTriggered: Qt.quit() }

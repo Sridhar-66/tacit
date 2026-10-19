@@ -24,6 +24,13 @@ Singleton {
     readonly property string music: StandardPaths.standardLocations(StandardPaths.MusicLocation)[0]
     readonly property string videos: StandardPaths.standardLocations(StandardPaths.MoviesLocation)[0]
 
+    // The shell's entry point, so `qs -p $shellFile ipc call ...` reaches the running shell.
+    // ipc matches an instance by the config file path it was started with, and the session starts
+    // qs by path (execs.lua: qs -p $TACIT_SHELL; the packaged supervisor repeats it), which is
+    // this file. `qs -c tacit` resolves through /etc/xdg/quickshell/tacit to a different path, so
+    // on an installed system it reaches no instance at all.
+    property string shellFile: FileUtils.trimFileProtocol(Quickshell.shellPath("shell.qml"))
+
     // Other dirs used by the shell, without "file://"
     property string assetsPath: Quickshell.shellPath("assets")
     property string scriptPath: Quickshell.shellPath("scripts")

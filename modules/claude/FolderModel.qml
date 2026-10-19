@@ -36,7 +36,7 @@ Item {
     property bool frozen: false
     property string selectedId: ""
     property var host: null           // connected, request({op: "delete", id}, cb)
-    property var shellIpc: ["qs", "-c", "tacit", "ipc", "call", "files"]
+    property var shellIpc: ["qs", "-p", Directories.shellFile, "ipc", "call", "files"]
     property string stage: ""         // a demo stage (notch-stage): live sessions and windows outside it are left out
 
     // ── outputs ─────────────────────────────────────────────────────────────

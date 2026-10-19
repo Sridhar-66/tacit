@@ -343,7 +343,7 @@ Item {
         Quickshell.execDetached(["sh", "-c", 'printf %s "$1" | wl-copy', "sh", entry.path]);
         toast("Path copied");
     }
-    function showInPinax() { if (entry) Quickshell.execDetached(["qs", "-c", "tacit", "ipc", "call", "files", "reveal", entry.path]); }
+    function showInPinax() { if (entry) Quickshell.execDetached(["qs", "-p", Directories.shellFile, "ipc", "call", "files", "reveal", entry.path]); }
     // Open with: the applications that take this file's type, the default first; nothing is remembered
     function openWith(x, y) {
         if (!entry) return;

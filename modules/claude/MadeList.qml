@@ -26,7 +26,7 @@ Item {
     // the commands ↵ and ⇧↵ run, as prefixes; tests point them at a fake
     property var opener: ["xdg-open"]
     property var editor: [`${Quickshell.env("HOME")}/.local/bin/code-file`]
-    property var shellIpc: ["qs", "-c", "tacit", "ipc", "call", "files"]
+    property var shellIpc: ["qs", "-p", Directories.shellFile, "ipc", "call", "files"]
 
     // The host sends changes after every turn: the rows are rebuilt only when its list differs.
     property var shown: []
