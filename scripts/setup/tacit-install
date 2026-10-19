@@ -330,7 +330,17 @@ def install(disk, place, keep):
     # outside arch-chroot: there bootctl turns the failure to write the firmware's variables into a warning and
     # reports success, which is how a computer ends up starting Windows only
     esp = "/efi" if place == "next" else "/boot"
-    sh("bootctl", f"--root={TARGET}", f"--esp-path={esp}", "--boot-path=/boot", "install")
+    # --boot-path names /boot only when it is a second, XBOOTLDR partition ("next to Windows"). In the whole-disk
+    # install the ESP *is* /boot, and given the ESP's own partition as --boot-path bootctl reads it as an XBOOTLDR
+    # one and refuses: "/dev/sda1: Partition has wrong PART_ENTRY_TYPE=c12a7328-f81f-11d2-ba4b-00a0c93ec93b for
+    # XBOOTLDR partition" (systemd 262, a Dell Latitude 3480, 2026-10-19): the install stopped at the bootloader,
+    # after the disk was erased. Without it, bootctl's boot partition is the ESP, where the loader goes in this
+    # layout (reported and verified by hand on the laptop).
+    args = ["bootctl", f"--root={TARGET}", f"--esp-path={esp}"]
+    if place == "next":
+        args.append("--boot-path=/boot")
+    args.append("install")
+    sh(*args)
     suffix = {"x86_64": "x64", "aarch64": "aa64"}.get(os.uname().machine)
     if not suffix:
         raise Refused(f"this computer's UEFI ({os.uname().machine}) is not one Tacit knows")

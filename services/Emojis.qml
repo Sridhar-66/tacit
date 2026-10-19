@@ -12,7 +12,12 @@ import Quickshell.Io
  */
 Singleton {
     id: root
-    property string emojiScriptPath: `${Directories.config}/hypr/hyprland/scripts/fuzzel-emoji.sh`
+    // The list lives in the session's own script. An installed system keeps it under TACIT_HYPR
+    // (/usr/share/tacit/hypr): a fresh account has no ~/.config/hypr, so the picker found no file and answered
+    // "No emoji for ..." to every query (2026-10-19). The person's own copy wins when there is one.
+    readonly property string ownScriptPath: `${Directories.config}/hypr/hyprland/scripts/fuzzel-emoji.sh`
+    readonly property string shippedScriptPath: `${Quickshell.env("TACIT_HYPR") || "/usr/share/tacit/hypr"}/hyprland/scripts/fuzzel-emoji.sh`
+    property string emojiScriptPath: root.ownScriptPath
 	property string lineBeforeData: "### DATA ###"
     property list<var> list
     readonly property var preparedEntries: list.map(a => ({
@@ -43,12 +48,17 @@ Singleton {
         root.list = emojis.map(line => line.trim())
     }
 
-    FileView { 
+    FileView {
         id: emojiFileView
         path: Qt.resolvedUrl(root.emojiScriptPath)
-        onLoadedChanged: {
-            const fileContent = emojiFileView.text()
-            root.updateEmojis(fileContent)
+        onLoaded: root.updateEmojis(emojiFileView.text())
+        onLoadFailed: error => {
+            // an install has no ~/.config/hypr: the session's own copy under TACIT_HYPR is the emoji list there
+            if (root.emojiScriptPath !== root.shippedScriptPath) {
+                root.emojiScriptPath = root.shippedScriptPath
+                return
+            }
+            console.warn("[Emojis] no emoji list at " + root.emojiScriptPath)
         }
     }
 }
