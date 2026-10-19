@@ -1,0 +1,10 @@
+# A keyboard or pointing device that autosuspends does not always come back: USB and I2C-HID input freezes mid-session
+# and only a reboot brings it back (a known failure: ArchWiki Power management -> USB autosuspend; the kernel added
+# I2C_HID_QUIRK_NO_RUNTIME_PM in 2018 for Hantick and 2019 for Goodix touchpads). Keep HID input out of runtime
+# suspend: the session opens these devices, so the power cost is negligible, and 99- comes after systemd's own
+# 60-autosuspend.rules, which enables autosuspend from the hwdb.
+#
+# USB: match the HID interface (class 03); the interface is not what suspends, its parent device is.
+ACTION=="add|change", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", ATTR{bInterfaceClass}=="03", TEST=="../power/control", ATTR{../power/control}="on"
+# I2C: the HID client (driver i2c_hid_acpi or i2c_hid_of), which the session holds open; bind fires once it is bound.
+ACTION=="add|change|bind", SUBSYSTEM=="i2c", DRIVER=="i2c_hid*", TEST=="power/control", ATTR{power/control}="on"
