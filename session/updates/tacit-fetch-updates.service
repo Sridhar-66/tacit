@@ -10,3 +10,6 @@ ExecStart=/usr/lib/tacit/tacit-fetch-updates
 Nice=19
 IOSchedulingClass=idle
 CPUWeight=20
+# stopped by a restart or a shutdown halfway: pacman lets go of its lock on SIGINT, not on SIGTERM, and the lock it left
+# made the install at the next start refuse to run and every later download skip (Discord, 2026-10-20)
+KillSignal=SIGINT

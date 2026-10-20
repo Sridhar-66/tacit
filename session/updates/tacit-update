@@ -10,8 +10,21 @@ set -u
 state=/var/lib/tacit
 mkdir -p "$state"
 
+# Before a restart that installs: a download still running is stopped (cleanly: KillSignal=SIGINT), a lock left by one
+# stopped another way is cleared, and what the install needs is downloaded now, while the computer is online. The install
+# at the start has no network: a Restart pressed during a download killed it, and the install found pacman's lock and
+# the files missing (Discord, 2026-10-20).
+ready() {
+	systemctl stop tacit-fetch-updates.service tacit-fetch-updates-now.service 2>/dev/null
+	if [ -e /var/lib/pacman/db.lck ] && ! pgrep -x pacman >/dev/null; then
+		rm -f /var/lib/pacman/db.lck
+	fi
+	pacman -Suw --noconfirm --noprogressbar > "$state/download.log" 2>&1
+}
+
 case "${1:-}" in
 now)
+	ready
 	ln -sfn /var/cache/pacman/pkg /system-update
 	;;
 tonight)
@@ -33,12 +46,15 @@ night)
 			&& [ "$(loginctl show-session "$s" -p LockedHint --value)" != yes ] && exit 0
 	done
 	systemctl stop tacit-update-night.timer
+	ready
 	ln -sfn /var/cache/pacman/pkg /system-update
 	systemctl reboot
 	;;
 install)
 	# taken away first: an install that fails can never run again at every start
 	rm -f /system-update
+	# nothing else runs at this point of the start: a lock is one a stopped pacman left behind
+	rm -f /var/lib/pacman/db.lck
 	before=$(pacman -Q)
 	pacman -Su --noconfirm --noprogressbar > "$state/update.log" 2>&1
 	rc=$?

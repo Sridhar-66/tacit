@@ -5,7 +5,12 @@
 # (From ~/dev/tacit-updates 5b2428e; tacit-session installs it.)
 set -u
 
-[ -e /var/lib/pacman/db.lck ] && exit 0
+# pacman at work: not now. A lock with no pacman behind it is one a stopped pacman left (a restart in the middle of a
+# download), and kept every later download from starting
+if [ -e /var/lib/pacman/db.lck ]; then
+    pgrep -x pacman >/dev/null && exit 0
+    rm -f /var/lib/pacman/db.lck
+fi
 
 on_mains=0 battery=""
 for d in /sys/class/power_supply/*; do
