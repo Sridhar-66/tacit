@@ -18,7 +18,7 @@ Singleton {
     // declares, so without a stamp on the file there is no way to tell a value that was never
     // set from one this build no longer knows the name of - and the next settings change writes
     // the loss to disk. migrate() carries a file with a lower stamp forward.
-    readonly property int currentConfigVersion: 1
+    readonly property int currentConfigVersion: 3
 
     function setNestedValue(nestedKey, value) {
         let keys = nestedKey.split(".");
@@ -77,6 +77,17 @@ Singleton {
         // v0 (no stamp at all): the left sidebar and its corner action were removed.
         if (from < 1 && root.options.sidebar.cornerOpen.bottomLeftAction === "sidebarLeftOpen")
             root.options.sidebar.cornerOpen.bottomLeftAction = "overviewOpen";
+        // v2: the wallpaper is no longer blurred unless asked for (Settings > Wallpaper). Everyone who had it came
+        // from the old default, and turned it off by editing this file (Discord, 2026-10-19/20)
+        if (from < 2)
+            root.options.background.showBlur = false;
+        // v3: the apps' see-through follows Settings > Appearance (Tacit.windowSeeThrough). It never did: every app was
+        // Frosted while Settings showed Solid, the default (Discord, 2026-10-20: "I'm choosing solid"). A Solid that
+        // never worked becomes what was on screen, Frosted; Clear is kept.
+        if (from < 3 && !root.options.appearance.transparency.enable) {
+            root.options.appearance.transparency.enable = true;
+            root.options.appearance.transparency.automatic = true;
+        }
         if (from === root.currentConfigVersion) return;
         root.options.configVersion = root.currentConfigVersion;
         root.writeNow();
@@ -176,8 +187,9 @@ Singleton {
                     property string expressive: "Tacit Sans"
                 }
                 property JsonObject transparency: JsonObject {
-                    property bool enable: false
-                    property bool automatic: false
+                    // Frosted (Tacit.windowSeeThrough): the apps' glass as designed
+                    property bool enable: true
+                    property bool automatic: true
                     property real backgroundTransparency: 0.4
                     property real contentTransparency: 0.55
                 }
@@ -283,7 +295,7 @@ Singleton {
                 property string lockWall: ""
                 property bool widgetsLocked: false
                 property bool showGrid: true
-                property bool showBlur: true
+                property bool showBlur: false
                 property string splitRatio: "100" // 25 50 100
                 property string splitSide: "left"
                 property bool showSnapLines: true

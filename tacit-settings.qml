@@ -1133,6 +1133,12 @@ ApplicationWindow {
                     current: Config.options.wallpaperSelector.changeInterval
                     onPicked: value => Config.options.wallpaperSelector.changeInterval = value
                 }
+                SwitchRow {
+                    label: "Blur the wallpaper"
+                    description: "A soft picture behind the desktop instead of a sharp one"
+                    checked: Config.options.background.showBlur
+                    onToggled: value => Config.options.background.showBlur = value
+                }
                 SettingRow {
                     label: "Lock screen picture"
                     description: Config.options.background.lockWall.length > 0
