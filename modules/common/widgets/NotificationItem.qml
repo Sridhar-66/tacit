@@ -87,8 +87,12 @@ Item { // Notification item area
             if (mouse.button === Qt.LeftButton) {
                 const actions = notificationObject?.actions ?? [];
                 const action = actions.find(a => a.identifier === "default") ?? (actions.length === 1 ? actions[0] : null);
-                if (action)
+                if (action) {
+                    // the app takes the action but cannot raise its own window on Wayland (it has no activation
+                    // token): the window comes forward from here, then the app shows what was clicked
+                    Notifications.focusApp(notificationObject);
                     Notifications.attemptInvokeAction(notificationObject?.notificationId, action.identifier);
+                }
                 else if (Notifications.open(notificationObject))   // no action: its link, else the app
                     root.destroyWithAnimation();
                 else if (root.expanded && notificationObject?.hasInlineReply)   // a chat: the reply is the action

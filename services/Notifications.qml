@@ -489,7 +489,21 @@ Singleton {
             openLink(link);
             return true;
         }
-        return focusApp(notif);
+        return bringForward(notif);
+    }
+    // The app's window forward, else the app itself when it has none open (Discord in the tray): a click on its
+    // notification did nothing (Discord, 2026-10-20). Phone notifications have no app here.
+    function bringForward(notif) {
+        if (focusApp(notif))
+            return true;
+        const id = notif?.desktopEntry ?? "";
+        if (id.length === 0 || id === "org.kde.kdeconnect.daemon")
+            return false;
+        const entry = DesktopEntries.byId(id) ?? DesktopEntries.heuristicLookup(id);
+        if (!entry)
+            return false;
+        AppScope.launch(entry);
+        return true;
     }
     function windowFor(notif) {
         if (!notif)
