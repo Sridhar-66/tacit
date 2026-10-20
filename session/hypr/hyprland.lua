@@ -49,7 +49,7 @@ layer("execs")
 layer("general")
 layer("rules")
 if is_file_exists("/usr/share/tacit/hypr/tacit/browser.lua") then
-    safe_require("tacit.browser")  -- Opsis's peek window rules (the tacit-opsis package)
+    safe_require("tacit.browser")  -- Thyris's sign-in page in the notch (the tacit-thyris package)
 end
 layer("keybinds")
 
