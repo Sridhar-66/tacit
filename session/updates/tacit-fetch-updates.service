@@ -1,7 +1,6 @@
 [Unit]
 Description=Tacit: download the waiting updates (never installs them)
-Wants=network-online.target
-After=network-online.target
+# no network-online.target (see tacit-fetch-updates-now.service): the timer's first look is 20 minutes after the start
 # not on the USB stick: its updates would go to memory and be gone at the next start
 ConditionPathExists=!/run/archiso
 

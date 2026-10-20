@@ -4581,7 +4581,7 @@ ApplicationWindow {
                         color: Appearance.colors.colInkMain
                     }
                     StyledText {
-                        text: `Version ${Product.version}`
+                        text: `Version ${Updates.currentVersion || Product.version}`   // the installed release (/usr/share/tacit/release)
                         font.pixelSize: 15
                         color: Tacit.inkMeta
                     }
@@ -4611,13 +4611,29 @@ ApplicationWindow {
                 SettingRow { clickable: false; glyph: "schedule"; label: "Running for"; control: StyledText { text: DateTime.uptime; color: Tacit.inkMeta; font.pixelSize: 15 } }
             }
             // Tacit downloads its updates by itself and installs them while the computer restarts (session/updates);
-            // the shell's Updates.qml writes what is waiting to updates.json. "Check every" went: the download has its own
-            // timer and the shell looks every half hour.
+            // the shell's Updates.qml writes what is waiting to updates.json. A check shows itself from the press: the
+            // list, then the download as it goes, then the answer, with this Tacit's version and what changed
+            // (2026-10-20: "Looking now" for minutes, and nobody could tell whether anything had come).
             Group {
                 id: updatesGroup
                 title: "Updates"
+                aside: Updates.currentVersion.length > 0 ? `Tacit ${Updates.currentVersion}` : ""
                 property var state: ({})
                 property bool tonight: false
+                readonly property bool busy: Updates.phase !== ""
+                readonly property bool ready: !busy && updatesGroup.state.ready === true
+                readonly property int waiting: updatesGroup.state.count ?? 0
+                readonly property string checkedText: {
+                    const t = Updates.lastChecked || updatesGroup.state.checked || 0;
+                    if (!t)
+                        return "";
+                    const m = Math.round((Date.now() - t) / 60000);
+                    return m < 1 ? "Checked just now" : m < 60 ? `Checked ${m} min ago`
+                        : `Checked at ${Qt.formatTime(new Date(t), "hh:mm")}`;
+                }
+                // the notes shown: the waiting release's while one waits, else this one's
+                readonly property var shownNotes: updatesGroup.ready && Updates.nextNotes.length > 0 ? Updates.nextNotes
+                    : Updates.notes.filter(r => r.version === Updates.currentVersion)
                 FileView {
                     path: `${Directories.userStateDir}/updates.json`
                     watchChanges: true
@@ -4631,19 +4647,27 @@ ApplicationWindow {
                         }
                     }
                 }
+                // a download already going in the background shows as it goes
+                Component.onCompleted: Updates.follow()
                 SettingRow {
-                    visible: updatesGroup.state.count !== undefined
+                    visible: Updates.available
                     clickable: false
                     glyph: "system_update"
-                    label: Updates.lastCheckFailed ? "Couldn't check for updates"
-                        : !(updatesGroup.state.count > 0) ? "Tacit is up to date"
-                        : updatesGroup.state.ready ? (updatesGroup.state.tacitVersion ? `Tacit ${updatesGroup.state.tacitVersion} is ready` : "Updates are ready")
-                        : "Updates are on their way"
-                    description: updatesGroup.tonight ? "Tonight, on the charger"
-                        : updatesGroup.state.ready ? "They install while the computer restarts"
-                        : updatesGroup.state.count > 0 ? "Downloading in the background" : ""
+                    label: Updates.phase === "looking" ? "Checking for updates"
+                        : Updates.phase === "downloading" ? `Downloading ${Updates.count} ${Updates.count === 1 ? "update" : "updates"}`
+                        : Updates.lastCheckFailed ? "Couldn't check for updates"
+                        : updatesGroup.waiting === 0 ? "Tacit is up to date"
+                        : updatesGroup.ready ? (updatesGroup.state.tacitVersion ? `Tacit ${updatesGroup.state.tacitVersion} is ready` : "Updates are ready")
+                        : `${updatesGroup.waiting} ${updatesGroup.waiting === 1 ? "update" : "updates"} to download`
+                    description: Updates.phase === "looking" ? "Asking for the newest list"
+                        : Updates.phase === "downloading" ? (Updates.totalMB > 0 ? `${Updates.doneMB} of ${Updates.totalMB} MB` : "Starting")
+                        : Updates.lastCheckFailed ? "Check that this computer is online, then try again"
+                        : updatesGroup.tonight ? "Tonight, on the charger"
+                        : updatesGroup.ready ? `${updatesGroup.waiting} ${updatesGroup.waiting === 1 ? "update" : "updates"} · they install while the computer restarts`
+                        : updatesGroup.waiting > 0 ? "Check for updates gets them now"
+                        : updatesGroup.checkedText
                     control: Row {
-                        visible: updatesGroup.state.ready === true && !updatesGroup.tonight
+                        visible: updatesGroup.ready && !updatesGroup.tonight
                         spacing: 4
                         TextButton {
                             label: "Tonight"
@@ -4658,13 +4682,85 @@ ApplicationWindow {
                         }
                     }
                 }
+                // how far: a sand line on a quiet track, moving while there is nothing yet to measure
+                Item {
+                    visible: updatesGroup.busy
+                    // a layout's row: its width from the layout (a width of its own is ignored there)
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    implicitHeight: 22
+                    Rectangle {
+                        id: track
+                        x: 52; y: 4
+                        width: parent.width - 52 - 20
+                        height: 4
+                        radius: 2
+                        color: Tacit.raised
+                        clip: true
+                        Rectangle {
+                            height: parent.height
+                            radius: 2
+                            color: Tacit.accent
+                            width: Updates.phase === "downloading" ? Math.max(8, parent.width * Updates.progress) : parent.width * 0.22
+                            Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+                            SequentialAnimation on x {
+                                running: Updates.phase === "looking"
+                                loops: Animation.Infinite
+                                NumberAnimation { from: -track.width * 0.22; to: track.width; duration: 1400; easing.type: Easing.InOutQuad }
+                            }
+                            onVisibleChanged: x = 0
+                            Connections { target: Updates; function onPhaseChanged() { if (Updates.phase !== "looking") parent.x = 0; } }
+                        }
+                    }
+                }
+                // what changed: the release waiting, or this one
+                Column {
+                    visible: updatesGroup.shownNotes.length > 0 && !updatesGroup.busy
+                    // the layout's width, not its longest line's: the lines wrap (they ran past the window, VM 2026-10-20)
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    topPadding: 10
+                    bottomPadding: 12
+                    spacing: 6
+                    Repeater {
+                        model: updatesGroup.shownNotes
+                        delegate: Column {
+                            required property var modelData
+                            x: 52
+                            width: parent.width - 52 - 20
+                            spacing: 6
+                            StyledText {
+                                text: updatesGroup.ready ? `What's new in Tacit ${modelData.version}` : `New in Tacit ${modelData.version}`
+                                font.pixelSize: 15
+                                font.weight: Font.Medium
+                                color: Tacit.inkMain
+                            }
+                            Repeater {
+                                model: modelData.changes ?? []
+                                delegate: Row {
+                                    required property string modelData
+                                    width: parent.width
+                                    spacing: 10
+                                    Rectangle { y: 8; width: 4; height: 4; radius: 2; color: Tacit.inkMeta }
+                                    StyledText {
+                                        width: parent.width - 14
+                                        text: modelData
+                                        font.pixelSize: 14
+                                        color: Tacit.inkSec
+                                        wrapMode: Text.Wrap
+                                        lineHeight: 1.2
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 SettingRow {
                     visible: Updates.available
                     glyph: "refresh"
                     label: "Check for updates"
-                    description: Updates.checking ? "Looking now"
-                        : Updates.lastCheckFailed ? "The last check didn't work"
-                        : "Now, instead of at the next look"
+                    muted: updatesGroup.busy
+                    description: updatesGroup.busy ? "Looking now" : Updates.lastCheckFailed ? "The last check didn't work" : "Now, instead of at the next look"
                     onActivated: Updates.checkNow()
                 }
                 SwitchRow {

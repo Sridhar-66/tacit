@@ -167,8 +167,8 @@ Singleton {
             return 7000;
         case "update":      // said once: it stays long enough to answer
             return 15000;
-        case "updated":
-            return 5000;
+        case "updated":     // its What's new is there to be pressed
+            return 10000;
         case "download":
             return hold.download;
         case "layout":
@@ -259,10 +259,12 @@ Singleton {
         root.transientState = "";
         root.transientPriority = -1;
         // a peek is news of a moment: one that waited more than 10 s (behind an ask, say) goes rather than arriving
-        // late; an ask and a notification wait their turn
+        // late; an ask, a notification and an update's lines wait their turn (said once: "Updated to Tacit 1.0.1" waited
+        // behind the greeting at a start and was dropped unseen, VM 2026-10-20)
         const now = Date.now();
-        if (root.queue.some(q => q.name !== "claudeAsk" && q.name !== "notification" && q.at > 0 && now - q.at > 10000))
-            root.queue = root.queue.filter(q => q.name === "claudeAsk" || q.name === "notification" || !(q.at > 0) || now - q.at <= 10000);
+        const waits = q => q.name === "claudeAsk" || q.name === "notification" || q.name === "update" || q.name === "updated";
+        if (root.queue.some(q => !waits(q) && q.at > 0 && now - q.at > 10000))
+            root.queue = root.queue.filter(q => waits(q) || !(q.at > 0) || now - q.at <= 10000);
         const at = root.queue.findIndex(q => !root.signinHeldBack(q.name));
         if (at >= 0) {
             let queued = root.queue.slice();

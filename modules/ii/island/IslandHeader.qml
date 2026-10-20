@@ -285,6 +285,8 @@ Item {
             return undoPillWing;
         case "update":
             return updateAnswerWing;
+        case "updated":
+            return IslandController.payload?.notes ? updatedNotesWing : messageGlyphWing;
         case "claudeAsk":
             return IslandController.payload?.permission ? claudeAnswerWing : messageGlyphWing;
         case "flow":
@@ -756,6 +758,19 @@ Item {
                     ring: true
                     action: () => Updates.restartNow()
                 }
+            }
+        }
+    }
+
+    // -- updated: what changed, in Settings
+    Component {
+        id: updatedNotesWing
+        Item {
+            StripPill {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: "What's new"
+                action: () => { IslandController.dismiss(); Updates.openNotes(); }
             }
         }
     }

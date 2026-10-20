@@ -174,6 +174,8 @@ MouseArea {
             visible: root.iconType === LauncherSearchResult.IconType.Text
             text: visible ? root.iconName : ""
             font.pixelSize: 19
+            font.family: "Noto Color Emoji"
+            font.variableAxes: ({})
         }
     }
 

@@ -14,7 +14,8 @@ for d in /sys/class/power_supply/*; do
         Battery) c=$(cat "$d/capacity" 2>/dev/null) && [ -n "$c" ] && battery=$c ;;
     esac
 done
-if [ "$on_mains" = 0 ] && [ -n "$battery" ] && [ "$battery" -lt 40 ]; then
+# asked for in Settings (tacit-fetch-updates-now.service): the person wants it, whatever the battery says
+if [ "${1:-}" != now ] && [ "$on_mains" = 0 ] && [ -n "$battery" ] && [ "$battery" -lt 40 ]; then
     echo "on battery at ${battery} %: not now"
     exit 0
 fi

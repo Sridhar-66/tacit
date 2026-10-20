@@ -6,7 +6,7 @@ polkit.addRule(function (action, subject) {
         subject.isInGroup("wheel") && action.lookup("verb") == "start") {
         var unit = action.lookup("unit");
         if (unit == "tacit-update@now.service" || unit == "tacit-update@tonight.service" ||
-            unit == "tacit-fetch-updates.service")
+            unit == "tacit-fetch-updates.service" || unit == "tacit-fetch-updates-now.service")
             return polkit.Result.YES;
     }
 });
