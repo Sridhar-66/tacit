@@ -324,6 +324,13 @@ def install(disk, place, keep):
     # NVIDIA's driver only where there is an NVIDIA display card (PCI vendor 0x10de, class 03xx)
     if not nvidia_present() and subprocess.run(["arch-chroot", TARGET, "pacman", "-Q", "nvidia-open"], capture_output=True).returncode == 0:
         chroot("pacman", "-Rns", "--noconfirm", "nvidia-open", "nvidia-utils")
+    elif nvidia_present() and os.path.exists(f"{TARGET}/usr/lib/systemd/system/nvidia-suspend.service"):
+        # its video memory kept across sleep by NVIDIA's own services, as tacit-session sets it on an update (off,
+        # Hyprland could die on waking: an RTX 4050 laptop, 2026-10-20)
+        with open(f"{TARGET}/etc/modprobe.d/tacit-nvidia-sleep.conf", "w") as f:
+            f.write("# Tacit (Setup): NVIDIA video memory kept across sleep, for nvidia-suspend/-hibernate/-resume\n"
+                    "options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp\n")
+        chroot("systemctl", "enable", "nvidia-suspend.service", "nvidia-hibernate.service", "nvidia-resume.service")
     progress(0.80, "starting")
     chroot("mkinitcpio", "-P")
     progress(0.88, "starting")
