@@ -115,6 +115,10 @@ Singleton {
             Quickshell.execDetached(["qs", "-p", p.shell, "ipc", "call", p.target, "picked", ` ${JSON.stringify(paths)} `]);
     }
     property string lastFolder: ""
+    // Pinax's last copy or cut, one for every window (a window's own went stale the moment another window or app
+    // copied): { op: "copy" | "cut", paths, at }. The clipboard is the truth at a paste (FilesWindow.paste); this is
+    // the verb it carries and the cut rows drawn faint.
+    property var clip: null
     property var viewByFolder: ({})   // folder -> "list" | "grid", once chosen
     property var sizeByFolder: ({})   // folder -> the grid's icon size (1 = as made), once changed
     // How you left the window: its size, floating or tiled, maximised. The next one opens

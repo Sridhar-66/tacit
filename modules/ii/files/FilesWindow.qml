@@ -1256,7 +1256,6 @@ FloatingWindow {
     // reports to the status line while it runs, and carries its own undo (Ctrl+Z, or the
     // Undo pill for a minute). Nothing is lost: Delete is the trash; for good only after a
     // sheet that says how many and where.
-    property var clip: null           // { op: "copy" | "cut", paths }
     property int editingIndex: -1
     property var myJobs: ({})         // ids this window started
     property string undoJob: ""       // the last finished job with an undo
@@ -1264,8 +1263,8 @@ FloatingWindow {
     readonly property var activeJob: Jobs.activeJobs.find(j => win.myJobs[j.id]) ?? null
     readonly property var cutMap: {   // (no Object.fromEntries in this engine)
         let m = ({});
-        if (win.clip?.op === "cut")
-            for (const p of win.clip.paths)
+        if (Files.clip?.op === "cut")
+            for (const p of Files.clip.paths)
                 m[p] = true;
         return m;
     }
@@ -1516,7 +1515,7 @@ FloatingWindow {
     function copySelection(cutting) {
         if (win.selectedPaths.length === 0)
             return;
-        win.clip = { "op": cutting ? "cut" : "copy", "paths": win.selectedPaths.slice() };
+        Files.clip = { "op": cutting ? "cut" : "copy", "paths": win.selectedPaths.slice(), "at": Date.now() };
         // A cut goes out as x-special/gnome-copied-files, whose first line is the verb:
         // text/uri-list carries none, so another file manager pasted our cut as a copy.
         const urls = win.selectedPaths.map(x => win.fileUrl(x));
@@ -1529,39 +1528,43 @@ FloatingWindow {
     // Paste, or a drop: into a folder (this one, a folder row, a place), with the collisions
     // asked about once. Names already there are checked on disk when the target is not the
     // folder shown.
-    function bring(op, paths, target) {
+    function bring(op, paths, target, fromClip) {
         const dest = target ?? win.folder;
         const list = paths.filter(x => !(Files.parent(x) === dest && op === "move") && x !== dest && !dest.startsWith(x + "/"));
         if (list.length === 0) {
             if (op === "move") {   // a cut pasted where it already is: the rows would stay faint
-                win.clip = null;
+                Files.clip = null;
                 win.reason = "Already here";
                 reasonTimer.restart();
             }
             return;
         }
         if (dest !== win.folder) {
-            clashProbe.op = op; clashProbe.dest = dest; clashProbe.list = list;
+            clashProbe.op = op; clashProbe.dest = dest; clashProbe.list = list; clashProbe.fromClip = fromClip === true;
             clashProbe.running = true;
             return;
         }
-        win.bringChecked(op, list, dest, list.filter(x => win.nameTaken(x.split("/").pop(), "")));
+        win.bringChecked(op, list, dest, list.filter(x => win.nameTaken(x.split("/").pop(), "")), fromClip === true);
     }
     Process {
         id: clashProbe
         property string op: ""
         property string dest: ""
         property var list: []
+        property bool fromClip: false
         command: ["bash", "-c", `d='${StringUtils.shellSingleQuoteEscape(clashProbe.dest)}'; for f in ${clashProbe.list.map(x => `'${StringUtils.shellSingleQuoteEscape(x)}'`).join(" ")}; do [ -e "$d/$(basename -- "$f")" ] && printf '%s\n' "$f"; done; true`]
         stdout: StdioCollector {
-            onStreamFinished: win.bringChecked(clashProbe.op, clashProbe.list, clashProbe.dest, text.split("\n").filter(x => x.length > 0))
+            onStreamFinished: win.bringChecked(clashProbe.op, clashProbe.list, clashProbe.dest, text.split("\n").filter(x => x.length > 0), clashProbe.fromClip)
         }
     }
-    function bringChecked(op, list, dest, clashes) {
+    function bringChecked(op, list, dest, clashes, fromClip) {
         const go = policy => {
             win.run(op, [policy, dest].concat(list));
             if (op === "move")
-                win.clip = null;
+                Files.clip = null;
+            // a cut is pasted once, as in GNOME Files: left on the clipboard, a second paste moved files already gone
+            if (op === "move" && fromClip)
+                Quickshell.execDetached(["wl-copy", "--clear"]);
         };
         if (clashes.length === 0) {
             go("keep");
@@ -1576,12 +1579,14 @@ FloatingWindow {
         ];
         sheet.open();
     }
+    // The clipboard decides: the last copy wins, made in this window, another or another app. Pinax's own copy only
+    // stands in for it in the moment its wl-copy may not have taken the clipboard yet.
     function paste() {
-        if (win.clip && win.clip.paths.length > 0) {
-            win.bring(win.clip.op === "cut" ? "move" : "copy", win.clip.paths);
-            return;
-        }
-        clipboardProbe.running = true;   // files copied in another app
+        if (!clipboardProbe.running)
+            clipboardProbe.running = true;
+    }
+    function sameFiles(a, b) {
+        return a.length === b.length && a.every((x, i) => x === b[i]);
     }
     Process {
         id: clipboardProbe
@@ -1593,9 +1598,16 @@ FloatingWindow {
                 const lines = text.split(/\r?\n/).map(l => l.trim());
                 const op = lines[0] === "cut" ? "move" : "copy";
                 const paths = lines.filter(l => l.startsWith("file://")).map(u => FileUtils.trimFileProtocol(win.decodePath(u)));
-                if (paths.length > 0)
-                    win.bring(op, paths);
-                else {
+                const own = Files.clip;
+                if (paths.length > 0) {
+                    // another copy came since Pinax's: its cut rows are not cut any more
+                    if (own && !win.sameFiles(own.paths, paths))
+                        Files.clip = null;
+                    win.bring(op, paths, undefined, true);
+                } else if (own && own.paths.length > 0 && Date.now() - own.at < 1500) {
+                    win.bring(own.op === "cut" ? "move" : "copy", own.paths, undefined, true);
+                } else {
+                    Files.clip = null;
                     win.reason = "Nothing to paste";
                     reasonTimer.restart();
                 }
@@ -1882,7 +1894,7 @@ FloatingWindow {
                 case Qt.Key_Escape:
                     if (win.activeJob) win.stopJob();
                     else if (win.cursor >= 0 && win.offerFor(win.pathAt(win.cursor))) win.dismissOffer(win.pathAt(win.cursor));
-                    else if (win.clip?.op === "cut") win.clip = null;
+                    else if (Files.clip?.op === "cut") Files.clip = null;
                     else if (!win.wide && win.previewToggled) win.previewToggled = false;
                     else if (win.query.length > 0) win.query = "";
                     else win.clearSelection();
