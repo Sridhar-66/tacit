@@ -1,0 +1,7 @@
+# NetworkManager runs Tacit's networking. systemd's own preset (90-systemd.preset) also turned on systemd-networkd,
+# its wait-online (two minutes of waiting at every start that asked for the network) and systemd-homed at the first
+# boot of every install; a lower number wins. systemd-resolved stays as it is.
+disable systemd-networkd.service
+disable systemd-networkd.socket
+disable systemd-networkd-wait-online.service
+disable systemd-homed.service
