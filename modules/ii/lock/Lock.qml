@@ -29,7 +29,9 @@ LockScreen {
             "--image", Config.options.background.lockWall
         ]
         onExited: {
-            MaterialThemeLoader.useLockTheme()
+            // an unlock that came first has already put the desktop's colours back: they stay
+            if (GlobalStates.screenLocked)
+                MaterialThemeLoader.useLockTheme()
             root.lastProcessedLockWall = Config.options.background.lockWall
             root.lastProcessedDarkmode = Appearance.m3colors.darkmode
         }

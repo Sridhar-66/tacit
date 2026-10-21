@@ -575,6 +575,8 @@ Singleton {
         if (index !== -1) {
             const dropped = root.list[index];
             root.list.splice(index, 1);
+            // a handled one is no longer waiting to be read: the dot and count never outnumber what is left
+            root.unread = Math.min(root.unread, root.list.length);
             notifFileView.setText(stringifyList(root.list));
             triggerListChange()
             root.dropNotif(dropped);
