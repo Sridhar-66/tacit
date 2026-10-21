@@ -1028,7 +1028,8 @@ Singleton {
     Process {
         id: downloadWatch
         running: root.enabled && Config.options.island.states.download
-        command: ["bash", "-c", `d="$HOME/Downloads"; p='${StringUtils.shellSingleQuoteEscape(root.screenshotDir)}'; s=$(mktemp); n=$(mktemp); trap 'rm -f "$s" "$n"' EXIT; touch "$s"; while sleep 2; do touch "$n"; for dir in "$d" "$p"; do [ -n "$dir" ] && find "$dir" -maxdepth 1 -type f -newer "$s" ! -name '.*' ! -name '*.part' ! -name '*.crdownload' ! -name '*.tmp' -printf '%p\n' 2>/dev/null; done; find "$d" -maxdepth 1 -type f \\( -name '*.part' -o -name '*.crdownload' \\) -printf 'P\t%s\t%p\n' 2>/dev/null; mv -f "$n" "$s"; done`]
+        // the account's Downloads folder by its own name (xdg-user-dirs names it in the account's language: ~/Téléchargements)
+        command: ["bash", "-c", `d='${StringUtils.shellSingleQuoteEscape(FileUtils.trimFileProtocol(Directories.downloads))}'; p='${StringUtils.shellSingleQuoteEscape(root.screenshotDir)}'; s=$(mktemp); n=$(mktemp); trap 'rm -f "$s" "$n"' EXIT; touch "$s"; while sleep 2; do touch "$n"; for dir in "$d" "$p"; do [ -n "$dir" ] && find "$dir" -maxdepth 1 -type f -newer "$s" ! -name '.*' ! -name '*.part' ! -name '*.crdownload' ! -name '*.tmp' -printf '%p\n' 2>/dev/null; done; find "$d" -maxdepth 1 -type f \\( -name '*.part' -o -name '*.crdownload' \\) -printf 'P\t%s\t%p\n' 2>/dev/null; mv -f "$n" "$s"; done`]
         stdout: SplitParser {
             onRead: line => {
                 if (line.startsWith("P\t")) {   // a download still growing: name, size
