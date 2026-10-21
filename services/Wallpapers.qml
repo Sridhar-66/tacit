@@ -20,7 +20,9 @@ Singleton {
     property string generateThumbnailsMagickScriptPath: `${FileUtils.trimFileProtocol(Directories.scriptPath)}/thumbnails/generate-thumbnails-magick.sh`
     property alias directory: folderModel.folder
     readonly property string effectiveDirectory: FileUtils.trimFileProtocol(folderModel.folder.toString())
-    property url defaultFolder: Qt.resolvedUrl(`${Directories.pictures}/Wallpapers`)
+    // the folder Settings > Wallpaper shows and the rotation picks from (it was always ~/Pictures/Wallpapers here)
+    property url defaultFolder: Config.options.wallpaperSelector.userPath.length > 0
+        ? Qt.resolvedUrl(`file://${Config.options.wallpaperSelector.userPath}`) : Qt.resolvedUrl(`${Directories.pictures}/Wallpapers`)
     property alias folderModel: folderModel // Expose for direct binding when needed
     property string searchQuery: ""
     readonly property list<string> extensions: [ // TODO: add videos
@@ -177,7 +179,8 @@ Singleton {
         for (let i = 0; i < folderModel.count; i++) {
             if (folderModel.get(i, "fileIsDir")) continue;
             const path = folderModel.get(i, "filePath") || FileUtils.trimFileProtocol(folderModel.get(i, "fileURL"));
-            if (path && path.length) candidates.push(path);
+            // a folder that does not exist lists the working directory instead (quickshell-gotchas): only its own pictures
+            if (path && path.startsWith(root.effectiveDirectory + "/")) candidates.push(path);
         }
         return candidates;
     }

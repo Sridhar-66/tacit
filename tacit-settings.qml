@@ -803,6 +803,9 @@ ApplicationWindow {
             readonly property string folder: Config.options.wallpaperSelector.userPath.length > 0
                 ? Config.options.wallpaperSelector.userPath : `${FileUtils.trimFileProtocol(Directories.pictures)}/Wallpapers`
             readonly property string wallPath: Config.options.background.wallpaperPath
+            // where a pick starts: the folder the last picture came from (Discord, Axy: it always went back to Pictures)
+            readonly property string pickFrom: Config.options.wallpaperSelector.userPath.length > 0
+                ? Config.options.wallpaperSelector.userPath : FileUtils.trimFileProtocol(Directories.pictures)
             // a video wallpaper is drawn from its still
             readonly property string stillPath: /\.(mp4|webm|mkv|mov|avi)$/i.test(look.wallPath)
                 ? Config.options.background.thumbnailPath : look.wallPath
@@ -901,7 +904,11 @@ ApplicationWindow {
                                     activeFocusOnTab: true
                                     function choose() {
                                         if (tile.adds)
-                                            root.pickFile("A picture for the desktop", FileUtils.trimFileProtocol(Directories.pictures), path => look.apply(path));
+                                            root.pickFile("A picture for the desktop", look.pickFrom, path => {
+                                                // its folder is the wallpaper folder from now on: the pictures here, the rotation
+                                                Config.options.wallpaperSelector.userPath = path.replace(/\/[^/]*$/, "");
+                                                look.apply(path);
+                                            });
                                         else if (!tile.inUse)
                                             look.apply(tile.modelData);
                                     }
@@ -982,7 +989,7 @@ ApplicationWindow {
                             x: -10
                             glyph: "folder_open"
                             label: "Change the folder"
-                            onPressed: root.pickFolder("Your wallpaper folder", FileUtils.trimFileProtocol(Directories.pictures), path => Config.options.wallpaperSelector.userPath = path)
+                            onPressed: root.pickFolder("Your wallpaper folder", look.pickFrom, path => Config.options.wallpaperSelector.userPath = path)
                         }
                     }
                 }
