@@ -244,6 +244,17 @@ Singleton {
                         s.name = r.name;
                         changed = true;
                     }
+                    // a session no hook reports on (an install has no notch-session hooks in ~/.claude/settings.json)
+                    // follows the roster: adopted busy, it read "working" for good and raised "Quiet" peeks
+                    if (s.polled) {
+                        const now = r.status === "busy" ? "working" : "idle";
+                        if (s.state !== now) {
+                            s.state = now;
+                            changed = true;
+                        }
+                        if (now === "working")
+                            s.lastToolAt = Date.now();
+                    }
                 }
                 // gone from the roster = ended, however it ended
                 const alive = rows.map(r => r.sessionId);
