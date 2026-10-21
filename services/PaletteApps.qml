@@ -57,7 +57,7 @@ Singleton {
                 iconName: "code",
                 iconType: LauncherSearchResult.IconType.Material,
                 keywords: [path],
-                execute: () => Quickshell.execDetached([`${root.home}/.local/bin/code-open`, path]),
+                execute: () => Quickshell.execDetached([`${Directories.tacitBin}/code-open`, path]),
                 actions: [resultComp.createObject(null, {
                         name: Translation.tr("Show in Files"),
                         iconName: "folder_open",

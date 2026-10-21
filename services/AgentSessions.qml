@@ -169,7 +169,7 @@ Singleton {
     Process {
         id: restoreProc
         running: IslandController.enabled
-        command: [FileUtils.trimFileProtocol(Directories.home) + "/.local/bin/notch-sessions-restore"]
+        command: [Directories.tacitBin + "/notch-sessions-restore"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const list = text.split("\n").filter(l => l.includes("\t")).map(l => {

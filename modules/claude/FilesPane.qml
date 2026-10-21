@@ -87,7 +87,7 @@ Item {
     }
 
     function openInCode(p, line) {
-        Quickshell.execDetached([`${pane.home}/.local/bin/code-file`, p, String(line ?? 0)]);
+        Quickshell.execDetached([`${Directories.tacitBin}/code-file`, p, String(line ?? 0)]);
     }
 
     // ── what the session touched: edits, new files, reads; newest first ────

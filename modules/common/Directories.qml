@@ -10,6 +10,10 @@ import Quickshell
 Singleton {
     // XDG Dirs, with "file://"
     readonly property string home: StandardPaths.standardLocations(StandardPaths.HomeLocation)[0]
+    // Tacit's launchers and helpers (code-file, tacit-app, notch-prs, ...): the package's /usr/lib/tacit/bin, which the
+    // session names in TACIT_BIN. A session without it (the dev machine) keeps them in ~/.local/bin. Installs have no
+    // ~/.local/bin copies: a path written as ~/.local/bin/... did nothing there (Open in Graphis, Praxis's helpers)
+    readonly property string tacitBin: Quickshell.env("TACIT_BIN") || `${Quickshell.env("HOME")}/.local/bin`
     readonly property string config: StandardPaths.standardLocations(StandardPaths.ConfigLocation)[0]
     readonly property string state: StandardPaths.standardLocations(StandardPaths.StateLocation)[0]
     readonly property string cache: StandardPaths.standardLocations(StandardPaths.CacheLocation)[0]

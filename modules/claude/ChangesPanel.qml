@@ -215,7 +215,7 @@ Item {
     }
 
     // ── reading and acting (claude-review) ──────────────────────────────────
-    readonly property string tool: `${panel.home}/.local/bin/claude-review`
+    readonly property string tool: `${Directories.tacitBin}/claude-review`
     function refresh() {
         if (!panel.visible || !panel.cwd.length || panel.madeMode) return;
         if (panel.scope === "turn" ? panel.turnEdits.length === 0 : panel.scope === "session" && panel.scopeFiles.length === 0) {
@@ -341,7 +341,7 @@ Item {
     // in the side panel the file opens there (Ctrl: in Code); on its own, in Code
     function openAt(abs, line, inCode) {
         if (panel.tabs.length && !inCode) { panel.openRequested(abs, line ?? 0); return; }
-        Quickshell.execDetached([`${panel.home}/.local/bin/code-file`, abs, String(line ?? 0)]);
+        Quickshell.execDetached([`${Directories.tacitBin}/code-file`, abs, String(line ?? 0)]);
     }
 
     readonly property var shownFiles: panel.review.files ?? []

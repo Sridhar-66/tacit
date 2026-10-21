@@ -11,7 +11,7 @@ import Quickshell
 Singleton {
     id: root
 
-    readonly property string runner: `${Quickshell.env("HOME")}/.local/bin/app-scope`
+    readonly property string runner: `${Quickshell.env("TACIT_BIN") || Quickshell.env("HOME") + "/.local/bin"}/app-scope`
 
     /** A DesktopEntry or one of its DesktopActions. A terminal app keeps the caller's own path. */
     function launch(entry) {

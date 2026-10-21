@@ -82,7 +82,7 @@ Singleton {
     // recents rows, the session list. The script is not in this repo, and execDetached cannot
     // tell a missing binary from a started one, so a machine without it swallowed every hand-off
     // without a word. The guard runs it by position, so a prompt with quotes in it is untouched.
-    readonly property string handRunner: `${root.home}/.local/bin/claude-hand`
+    readonly property string handRunner: `${Directories.tacitBin}/claude-hand`
     function hand(op, a, b) {
         const args = [op, a, b].filter(x => x !== undefined);
         Quickshell.execDetached(["bash", "-c",
@@ -360,7 +360,7 @@ Singleton {
     property bool reading: false
     Process {
         id: contextProc
-        command: [`${root.home}/.local/bin/claude-context`]
+        command: [`${Directories.tacitBin}/claude-context`]
         stdout: StdioCollector { onStreamFinished: root.took(this.text) }
     }
     function snapshot() {

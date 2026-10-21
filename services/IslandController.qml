@@ -1313,7 +1313,7 @@ Singleton {
     // speak: open -> merged, checks -> failing, review newly requested. The first poll after
     // start is silent (it is not news). A pending review request is a glyph at rest.
     function pollNow() {
-        prProc.command = [FileUtils.trimFileProtocol(Directories.home) + "/.local/bin/notch-prs"].concat(Config.options.island.prRepos);
+        prProc.command = [Directories.tacitBin + "/notch-prs"].concat(Config.options.island.prRepos);
         prProc.running = false;
         prProc.running = true;
         diskProc.running = false;
@@ -1328,7 +1328,7 @@ Singleton {
         repeat: true
         triggeredOnStart: true
         onTriggered: {
-            prProc.command = [FileUtils.trimFileProtocol(Directories.home) + "/.local/bin/notch-prs"].concat(Config.options.island.prRepos);
+            prProc.command = [Directories.tacitBin + "/notch-prs"].concat(Config.options.island.prRepos);
             prProc.running = false;
             prProc.running = true;
         }
@@ -1537,7 +1537,7 @@ Singleton {
         for (const s of AgentSessions.sessions)
             if ((s.cwd + "").length > 0 && !repos.includes(s.cwd))
                 repos.push(s.cwd);
-        dirtyProc.command = [FileUtils.trimFileProtocol(Directories.home) + "/.local/bin/notch-dirty"].concat(repos);
+        dirtyProc.command = [Directories.tacitBin + "/notch-dirty"].concat(repos);
         dirtyProc.running = false;
         dirtyProc.running = true;
     }

@@ -25,7 +25,7 @@ Item {
     signal attachRequested(string path)
     // the commands ↵ and ⇧↵ run, as prefixes; tests point them at a fake
     property var opener: ["xdg-open"]
-    property var editor: [`${Quickshell.env("HOME")}/.local/bin/code-file`]
+    property var editor: [`${Directories.tacitBin}/code-file`]
     property var shellIpc: ["qs", "-p", Directories.shellFile, "ipc", "call", "files"]
 
     // The host sends changes after every turn: the rows are rebuilt only when its list differs.

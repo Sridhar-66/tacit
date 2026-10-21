@@ -257,7 +257,7 @@ ApplicationWindow {
     property var hookStates: ({})   // id -> the hooks' state, for sessions in a terminal
     Process {
         id: hookState
-        command: [`${root.home}/.local/bin/notch-sessions-restore`]
+        command: [`${Directories.tacitBin}/notch-sessions-restore`]
         stdout: StdioCollector {
             onStreamFinished: {
                 const states = {};

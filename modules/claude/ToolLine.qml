@@ -165,7 +165,7 @@ Item {
                     onClicked: m => {
                         const find = ((line.item.new ?? "").split("\n").find(l => l.trim().length) ?? "").trim();
                         if (line.files && !(m.modifiers & Qt.ControlModifier)) line.files.openFile(line.file, 0, find);
-                        else Quickshell.execDetached([`${Quickshell.env("HOME")}/.local/bin/code-file`, line.file, "0", find]);
+                        else Quickshell.execDetached([`${Directories.tacitBin}/code-file`, line.file, "0", find]);
                     }
                 }
                 StyledToolTip { text: line.files ? "Open (Ctrl: in Graphis)" : "Open in Graphis"; extraVisibleCondition: openArea.containsMouse }

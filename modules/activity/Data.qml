@@ -204,7 +204,7 @@ Item {
         } else if (what === "stop") {
             d.send({ op: "interrupt", id: item.id });
         } else if (what === "praxis") {
-            Quickshell.execDetached(["sh", "-c", `"$HOME/.local/bin/tacit-app" ensure praxis >/dev/null && "$HOME/.local/bin/tacit-app" call praxis open "$1" >/dev/null; "$HOME/.local/bin/tacit-app" call praxis present >/dev/null; "$HOME/.local/bin/tacit-app" focus praxis`, "sh", item.id]);
+            Quickshell.execDetached(["sh", "-c", `"${TACIT_BIN:-$HOME/.local/bin}/tacit-app" ensure praxis >/dev/null && "${TACIT_BIN:-$HOME/.local/bin}/tacit-app" call praxis open "$1" >/dev/null; "${TACIT_BIN:-$HOME/.local/bin}/tacit-app" call praxis present >/dev/null; "${TACIT_BIN:-$HOME/.local/bin}/tacit-app" focus praxis`, "sh", item.id]);
         } else if (what === "quitWindowless") {
             for (const a of d.windowless())
                 d.send({ op: "quit", key: a.key });

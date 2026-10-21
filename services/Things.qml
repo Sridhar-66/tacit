@@ -153,9 +153,8 @@ Singleton {
         Files.reveal(path);
     }
     function openInCode(path, asProject) {
-        const home = FileUtils.trimFileProtocol(Directories.home);
-        Quickshell.execDetached(asProject ? [`${home}/.local/bin/code-open`, path.replace(/\/$/, "")]
-            : [`${home}/.local/bin/code-file`, path, "0"]);
+        Quickshell.execDetached(asProject ? [`${Directories.tacitBin}/code-open`, path.replace(/\/$/, "")]
+            : [`${Directories.tacitBin}/code-file`, path, "0"]);
     }
     function hand(path) {
         // A new session, opened where the file actually is: a tarball in Downloads is not a
