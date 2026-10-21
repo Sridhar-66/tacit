@@ -63,6 +63,9 @@ install)
 	[ "$before" = "$after" ] && untouched=true
 	ok=false
 	[ "$rc" = 0 ] && ok=true
+	# the versions now installed stay in the cache, the ones they replaced go: pacman never clears it, and with a fetch
+	# every two hours a small disk filled. A failed install keeps everything for the next try.
+	[ "$rc" = 0 ] && pacman -Sc --noconfirm >> "$state/update.log" 2>&1
 	printf '{"at": %s, "ok": %s, "untouched": %s, "version": "%s"}\n' "$(date +%s)" "$ok" "$untouched" \
 		"$(pacman -Q tacit 2>/dev/null | awk '{print $2}')" > "$state/update-result.new"
 	chmod 644 "$state/update-result.new"

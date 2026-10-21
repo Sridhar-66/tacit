@@ -25,9 +25,17 @@ hl.env("PATH", "/usr/lib/tacit/bin:" .. (os.getenv("PATH") or "/usr/local/bin:/u
 -- Wayland
 hl.env("ELECTRON_OZONE_PLATFORM_HINT", "auto")
 
--- Applications
-local xdg_data_dirs_old = os.getenv("XDG_DATA_DIRS") or ""
-hl.env("XDG_DATA_DIRS", home_dir .. "/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share:" .. xdg_data_dirs_old)
+-- Applications: flatpak's exported apps, after Tacit's own entries (put in front of the list, they brought /usr/share back
+-- ahead of Tacit's: the terminal showed as foot and the hidden system tools came back in search)
+do
+    local parts, seen = {}, {}
+    local function add(d) if d ~= "" and not seen[d] then seen[d] = true; parts[#parts + 1] = d end end
+    add("/usr/share/tacit")
+    add(home_dir .. "/.local/share/flatpak/exports/share")
+    add("/var/lib/flatpak/exports/share")
+    for d in (os.getenv("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"):gmatch("[^:]+") do add(d) end
+    hl.env("XDG_DATA_DIRS", table.concat(parts, ":"))
+end
 
 -- Themes
 hl.env("QT_QPA_PLATFORM", "wayland;xcb")
