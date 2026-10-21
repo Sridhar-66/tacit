@@ -2649,7 +2649,11 @@ ApplicationWindow {
                     description: "The notch uses it to say hello"
                     placeholder: SystemInfo.username
                     text: Config.options.profile.displayName
-                    onCommitted: value => Config.options.profile.displayName = value
+                    // the notch says hello by the first word of it: Setup's first name was kept on its own and won
+                    onCommitted: value => {
+                        Config.options.profile.displayName = value;
+                        Config.options.island.greeting.name = value.trim().split(/\s+/)[0] ?? "";
+                    }
                 }
                 SettingRow {
                     id: pictureRow
