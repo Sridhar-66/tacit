@@ -169,6 +169,8 @@ Singleton {
             return 15000;
         case "updated":     // its What's new is there to be pressed
             return 10000;
+        case "window":      // the window band (WindowBand.qml): each line brings its own hold
+            return root.payload?.hold ?? 4000;
         case "download":
             return hold.download;
         case "layout":
@@ -372,6 +374,8 @@ Singleton {
         case "update":      // Tonight and Restart
         case "updated":
             return 204;
+        case "window":      // with its Reopen, Show or Undo; the hint is words alone
+            return root.payload?.pill ? 204 : 182;
         case "flow":
             return 160;
         case "download":

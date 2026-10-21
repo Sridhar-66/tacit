@@ -113,7 +113,14 @@ Item {
     }
 
     function activate(app) {
-        const windows = app.toplevels;
+        // a window the window band hid comes back first (the last one hidden); held windows are never cycled through
+        const hidden = app.toplevels.filter(t => WindowBand.heldAs(t) === "hidden");
+        if (hidden.length > 0) {
+            WindowBand.command("reopen", WindowBand.addressOf(hidden[hidden.length - 1]));
+            root.opened();
+            return;
+        }
+        const windows = app.toplevels.filter(t => WindowBand.heldAs(t) === "");
         if (windows.length === 0) {
             root.launch(app.appId);
             return;
@@ -344,13 +351,17 @@ Item {
                 required property int index
                 // the first program that is running but not pinned: a hairline before it
                 readonly property bool firstLoose: !pill.pinned && pill.index > 0 && root.programs[pill.index - 1].pinned
-                readonly property bool here: pill.modelData.toplevels.some(t => t.activated)
+                readonly property bool here: pill.modelData.toplevels.some(t => t.activated && WindowBand.heldAs(t) === "")
                 readonly property bool starting: root.launching === pill.appId && !pill.open
                 readonly property bool hovered: pillArea.containsMouse
                 onOpenChanged: if (pill.open && root.launching === pill.appId) root.launching = ""
                 readonly property string appId: modelData.appId
                 readonly property bool pinned: modelData.pinned
-                readonly property bool open: modelData.toplevels.length > 0
+                // a window being closed by the window band is gone already; a hidden one still counts
+                readonly property bool open: modelData.toplevels.some(t => WindowBand.heldAs(t) !== "closed")
+                // a window of it hidden by the band: a hollow tick says it is there to come back (under the sand tick
+                // when this is the program you are in)
+                readonly property bool hasHidden: modelData.toplevels.some(t => WindowBand.heldAs(t) === "hidden")
                 readonly property bool named: root.tier === 0 || (root.tier === 1 && pill.open)
                 readonly property string symbol: root.known[pill.appId]?.symbol ?? ""
                 readonly property bool dragging: root.draggingId === pill.appId
@@ -384,6 +395,19 @@ Item {
                 }
                 Behavior on color {
                     animation: Appearance.animation.elementMoveFast.colorAnimation.createObject(this)
+                }
+
+                // hidden by the window band: the tick's outline where it would be, so the window has a way back
+                Rectangle {
+                    visible: pill.hasHidden && !pill.here
+                    x: (pill.width - width) / 2
+                    y: root.tile + 4
+                    width: 24
+                    height: 4
+                    radius: 2
+                    color: "transparent"
+                    border.width: 1
+                    border.color: Tacit.accent
                 }
 
                 // the hairline that parts the pinned programs from the others running

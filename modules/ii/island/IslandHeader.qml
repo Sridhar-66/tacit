@@ -283,6 +283,8 @@ Item {
             return notificationAppWing;
         case "wallpaper":
             return undoPillWing;
+        case "window":
+            return IslandController.payload?.pill ? windowPillWing : messageGlyphWing;
         case "update":
             return updateAnswerWing;
         case "updated":
@@ -715,6 +717,24 @@ Item {
                 text: "Undo"
                 ring: true
                 action: () => IslandController.wallpaperUndo()
+            }
+        }
+    }
+
+    // -- the window band (WindowBand.qml): the way back from what a gesture did - Reopen, Show or Undo
+    Component {
+        id: windowPillWing
+        Item {
+            StripPill {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: IslandController.payload?.pill ?? ""
+                ring: true
+                action: () => {
+                    const p = IslandController.payload;
+                    IslandController.dismiss();
+                    WindowBand.act(p?.verb ?? "", p?.address ?? "");
+                }
             }
         }
     }

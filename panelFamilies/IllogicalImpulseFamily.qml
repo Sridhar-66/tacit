@@ -27,6 +27,7 @@ import qs.modules.ii.overlay
 import qs.modules.ii.verticalBar
 import qs.modules.ii.wallpaperSelector
 import qs.modules.ii.desktopMenu
+import qs.modules.ii.windowMenu
 import qs.modules.ii.files
 import qs.modules.ii.dropover
 import qs.modules.ii.frame
@@ -122,6 +123,9 @@ Scope {
     PanelLoader { component: WallpaperSelector {} }
     PanelLoader { component: Settings {} }
     PanelLoader { component: DesktopMenu {} }
+    // the window band's menu (a right click on a window's top edge); loading it also starts WindowBand, which
+    // listens for the band's events from the moment the shell starts
+    PanelLoader { component: WindowMenu {} }
     // The notch is the shelf: IslandContent catches GlobalStates.dropShelfOpen and opens on its
     // shelf view. This floating panel is the pre-notch surface, kept only for a machine running
     // without the notch, where nothing else consumes that flag - two consumers at once meant the
