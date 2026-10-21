@@ -242,7 +242,8 @@ switch() {
                 local video_path="$imgpath"
                 monitors=$(hyprctl monitors -j | jq -r '.[] | .name')
                 for monitor in $monitors; do
-                    mpvpaper -o "$VIDEO_OPTS" "$monitor" "$video_path" &
+                    # without the run lock (fd 8): mpvpaper never exits, and holding it made every later run wait 15 s
+                    mpvpaper -o "$VIDEO_OPTS" "$monitor" "$video_path" 8>&- &
                     sleep 0.1
                 done
             fi
@@ -428,7 +429,11 @@ main() {
                     set_accent_color ""
                     shift 2
                 else
-                    set_accent_color $(hyprpicker --no-fancy)
+                    # Escape in the picker gives nothing: the accent stays as it was and nothing is recoloured (an empty
+                    # one was saved and the desktop went back to the wallpaper's colours)
+                    picked=$(hyprpicker --no-fancy)
+                    [[ "$picked" =~ ^#?[A-Fa-f0-9]{6}$ ]] || exit 0
+                    set_accent_color "$picked"
                     shift
                 fi
                 ;;
@@ -566,7 +571,10 @@ regen_ground() {
     # tacit-boot-ground is handed the picture just switched to: read back from config.json it was "" on a new account,
     # whose shell wrote its settings over this run's (the VM test, 2026-10-16)
     local args=(--ground)
-    [[ "$mkassets" == /usr/lib/tacit/tacit-boot-ground && -n "$imgpath" ]] && args=(--wallpaper "$imgpath")
+    # a video wallpaper is drawn from its still, which tacit-boot-ground can read (the video failed every time)
+    local still="$imgpath"
+    [[ "$imgpath" =~ \.(mp4|webm|mkv|avi|mov)$ ]] && still="$THUMBNAIL_DIR/$(basename "$imgpath").jpg"
+    [[ "$mkassets" == /usr/lib/tacit/tacit-boot-ground && -n "$still" && -f "$still" ]] && args=(--wallpaper "$still")
     # A silent failure here leaves the splash and the lock ground on the previous wallpaper.
     {
         "$mkassets" "${args[@]}" >/dev/null 2>&1 || notify-send \
@@ -574,7 +582,7 @@ regen_ground() {
             -c "im.error" \
             "Boot splash not updated" \
             "The lock and splash ground still shows the previous wallpaper."
-    } &
+    } 8>&- &
 }
 # One run at a time: Light then Dark clicked quickly ran two at once, and the slower run's terminal
 # colours, made in the other mode, landed last (2026-10-07). A second run waits for the first; the
