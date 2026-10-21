@@ -256,7 +256,9 @@ Singleton {
     // the waiting release's notes, out of its downloaded package (signed with the rest of it)
     Process {
         id: nextNotesProc
-        command: ["bash", "-c", "f=$(pacman -Sp --print-format %l tacit 2>/dev/null | grep '^file://' | head -1); [ -n \"$f\" ] && bsdtar -xOf \"${f#file://}\" usr/share/tacit/notes.json 2>/dev/null"]
+        // tacit's own package: -Sp lists the new things it needs first (playerctl before tacit-1.1.0), and the first line
+        // had no notes, so the waiting release showed the installed one's
+        command: ["bash", "-c", "f=$(pacman -Sp --print-format %l tacit 2>/dev/null | grep -E '^file://.*/tacit-[0-9][^/]*-any\\.pkg\\.tar' | tail -1); [ -n \"$f\" ] && bsdtar -xOf \"${f#file://}\" usr/share/tacit/notes.json 2>/dev/null"]
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
