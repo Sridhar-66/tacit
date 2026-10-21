@@ -71,6 +71,14 @@ Singleton {
             }
         },
         {
+            name: Translation.tr("Screen recording"),
+            subtitle: IslandController.recording ? Translation.tr("Recording now") : Translation.tr("Whole screen, an area or a window"),
+            verb: IslandController.recording ? Translation.tr("Stop") : Translation.tr("Record"),
+            icon: IslandController.recording ? "stop_circle" : "screen_record",
+            keywords: "record recording screen video capture screencast",
+            run: () => IslandController.recording ? IslandController.stopRecording() : IslandController.openRecordSoon()
+        },
+        {
             name: Translation.tr("Settings"),
             subtitle: Translation.tr("Tacit's settings"),
             verb: Translation.tr("Go"),

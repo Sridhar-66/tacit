@@ -481,6 +481,15 @@ Singleton {
         root.keyboard = true;
         root.recordRequested();
     }
+    // from the palette's row or the control panel's pill: once their window has gone, so the sheet gets the keyboard
+    function openRecordSoon() {
+        recordOpenLater.restart();
+    }
+    Timer {
+        id: recordOpenLater
+        interval: 300
+        onTriggered: root.openRecord()
+    }
     // the sheet's choice, once the sheet has folded out of the picture (the area picker freezes the screen as it
     // opens); the whole screen is the notch's screen
     property string recordWhat: ""

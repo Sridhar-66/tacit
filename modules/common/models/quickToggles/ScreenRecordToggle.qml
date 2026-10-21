@@ -13,17 +13,10 @@ QuickToggleModel {
     hasStatusText: false
     toggled: Persistent.states.record.enable
     icon: toggled ? "stop_circle" : "screen_record"
+    // the notch's choice (or Stop while one runs), once the panel has gone
     mainAction: () => {
         GlobalStates.sidebarRightOpen = false;
-        delayedActionTimer.start();
-    }
-    Timer {
-        id: delayedActionTimer
-        interval: 300
-        repeat: false
-        onTriggered: {
-            Quickshell.execDetached([Directories.recordScriptPath]);
-        }
+        IslandController.openRecordSoon();
     }
     tooltipText: Translation.tr("Screen record")
 }
