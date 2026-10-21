@@ -18,7 +18,17 @@ T="$T_BIN/tacit-app"
 state=$(CODE_PROJECT="$top" "$T" ensure graphis) || exit 1
 if [ "$state" = up ]; then
 	cur=$("$T" call graphis root 2>/dev/null)
-	[ "$cur" != "$top" ] && "$T" call graphis open "$top"
+	if [ "$cur" != "$top" ]; then
+		# Graphis keeps its project while it has unsaved changes; the file, asked for by its path in the project it was
+		# meant for, then opened the other project's file of the same name (and a save wrote there)
+		case $("$T" call graphis open "$top") in
+		*'"opened":false'*)
+			"$T" call graphis present
+			"$T" focus graphis
+			notify-send -a Graphis "Save your changes first" "Graphis has unsaved changes in $(basename "$cur"). Save them, then open $(basename "$f") again."
+			exit 0 ;;
+		esac
+	fi
 fi
 "$T" call graphis present      # a closed window only hides
 "$T" call graphis fileAt "${f#"$top"/}" "$line"

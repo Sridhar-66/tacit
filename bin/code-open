@@ -9,6 +9,9 @@
 T_BIN=${TACIT_BIN:-$HOME/.local/bin}                          # Tacit's launchers (the package sets TACIT_BIN)
 d=$(realpath "${1:-$PWD}" 2>/dev/null || echo "$HOME")
 top=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)
+# a folder asked for that is not in a git repository opens as itself (it opened nothing in a running Graphis);
+# with no folder the picker shows, as before
+[ -z "$top" ] && [ -n "${1:-}" ] && [ -d "$d" ] && top=$d
 T="$T_BIN/tacit-app"
 state=$(CODE_PROJECT="$top" "$T" ensure graphis) || exit 1
 # Already running: a fresh instance takes CODE_PROJECT at startup, one that was up is showing
