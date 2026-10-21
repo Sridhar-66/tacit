@@ -150,6 +150,16 @@ Item {
         }
     }
 
+    // the recording's red dot is its stop: a click on it ends the recording
+    MouseArea {
+        anchors.centerIn: statusSlot
+        width: 30
+        height: 30
+        visible: statusSlot.visible && root.glyph === "fiber_manual_record"
+        cursorShape: Qt.PointingHandCursor
+        onClicked: IslandController.stopRecording()
+    }
+
     // ---------------------------------------------------------------- wings
     Loader {
         id: leftWing
@@ -285,6 +295,8 @@ Item {
             return undoPillWing;
         case "window":
             return IslandController.payload?.pill ? windowPillWing : messageGlyphWing;
+        case "record":
+            return recordPillWing;
         case "update":
             return updateAnswerWing;
         case "updated":
@@ -717,6 +729,23 @@ Item {
                 text: "Undo"
                 ring: true
                 action: () => IslandController.wallpaperUndo()
+            }
+        }
+    }
+
+    // -- a recording: its Stop (the red dot in the status slot stops it as well)
+    Component {
+        id: recordPillWing
+        Item {
+            StripPill {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Stop"
+                ring: true
+                action: () => {
+                    IslandController.dismiss();
+                    IslandController.stopRecording();
+                }
             }
         }
     }

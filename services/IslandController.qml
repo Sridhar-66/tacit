@@ -169,6 +169,8 @@ Singleton {
             return 15000;
         case "updated":     // its What's new is there to be pressed
             return 10000;
+        case "record":      // Recording, with its Stop
+            return 5000;
         case "window":      // the window band (WindowBand.qml): each line brings its own hold
             return root.payload?.hold ?? 4000;
         case "download":
@@ -374,6 +376,8 @@ Singleton {
         case "update":      // Tonight and Restart
         case "updated":
             return 204;
+        case "record":
+            return 172;
         case "window":      // with its Reopen, Show or Undo; the hint is words alone
             return root.payload?.pill ? 204 : 182;
         case "flow":
@@ -442,6 +446,16 @@ Singleton {
         && group.target?.type === PwNodeType.AudioInStream
         && !/^(echo-cancel|filter-chain|book4_mic_aec)/.test(group.target?.name ?? ""))
     readonly property bool recording: Persistent.states.record.enable
+    // a recording says so with its Stop (the bar's recorder button used to); the red dot stops it too (IslandHeader)
+    onRecordingChanged: {
+        if (root.recording)
+            root.request("record", { "text": "Recording", "icon": "fiber_manual_record" }, 70);
+        else if (root.transientState === "record")
+            root.dismiss();
+    }
+    function stopRecording() {
+        Quickshell.execDetached([Directories.recordScriptPath]);
+    }
     // A running timer is a status glyph; the hover strip carries its remaining time and controls.
     readonly property bool timerAmbient: TimerService.pomodoroRunning || TimerService.countdownRunning
     readonly property string ambientGlyph: {
