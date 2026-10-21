@@ -42,6 +42,12 @@ safe_require("hyprland.execs")
 safe_require("hyprland.general")
 safe_require("hyprland.rules")
 safe_require("hyprland.colors")
+-- the colours made from the person's wallpaper (matugen writes ~/.config/hypr/hyprland/colors.lua): `require` finds
+-- Tacit's packaged file of the same name first, so the borders never followed the wallpaper
+if theirs("hyprland/colors") then
+    local ok, err = pcall(dofile, HOME .. "/.config/hypr/hyprland/colors.lua")
+    if not ok then print("[tacit] the wallpaper's colours did not load: " .. tostring(err)) end
+end
 safe_require("hyprland.keybinds")
 
 -- Tacit's choices, then the person's --
