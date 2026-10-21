@@ -25,8 +25,23 @@
 #include <signal.h>
 #include <string.h>
 
-/* Which quickshell configuration to talk to. QS_CONFIG_NAME is quickshell's own name for it. */
-#define CONFIG_DEFAULT "tacit"
+/* Which shell to talk to: QS_CONFIG_NAME, quickshell's own name for a configuration, when it is set; else the folder
+ * Tacit's shell runs from (qs -p), as Thyris and the portal find it. An install's runs as /usr/share/tacit/shell
+ * (TACIT_SHELL, set by the session): `qs -c tacit` named /etc/xdg/quickshell/tacit, no running shell matched, and
+ * Show in folder failed on every install. */
+static const gchar *shell_folder(void) {
+    static gchar *folder;
+    if (!folder) {
+        const gchar *env = g_getenv("TACIT_SHELL");
+        if (env && *env)
+            folder = g_strdup(env);
+        else if (g_file_test("/usr/share/tacit/shell", G_FILE_TEST_IS_DIR))
+            folder = g_strdup("/usr/share/tacit/shell");
+        else
+            folder = g_build_filename(g_get_home_dir(), ".config", "quickshell", "tacit", NULL);
+    }
+    return folder;
+}
 
 /* A call takes about 30 ms. A wedged shell would otherwise hold the caller until its own D-Bus
  * timeout runs out, with no window and no message. */
@@ -140,7 +155,8 @@ static void tell_shell(const gchar *verb, gchar **paths, guint n, GDBusMethodInv
     batch->pending = (gint) n;   /* counted up front: a spawn that fails must not answer for the rest */
 
     for (guint i = 0; i < n; i++) {
-        const gchar *argv[] = { "qs", "-c", (config && *config) ? config : CONFIG_DEFAULT,
+        const gboolean named = config && *config;
+        const gchar *argv[] = { "qs", named ? "-c" : "-p", named ? config : shell_folder(),
                                 "ipc", "call", "files", verb, paths[i], NULL };
         GError *error = NULL;
         GPid pid = 0;
