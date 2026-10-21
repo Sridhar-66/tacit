@@ -433,10 +433,13 @@ def account(answers):
     lang = answers.get("language") or "en_GB"
     if not re.fullmatch(r"[a-z]{2,3}_[A-Z]{2}", lang):
         lang = "en_GB"
-    supported = open(f"{TARGET}/usr/share/i18n/SUPPORTED").read()
-    locale = f"{lang}.UTF-8" if f"{lang}.UTF-8 UTF-8" in supported else "en_GB.UTF-8"
+    # glibc lists most as "xx_YY.UTF-8 UTF-8" and some only as "xx_YY UTF-8" (fa_IR, ur_PK, hi_IN, am_ET, sw_KE, ti_ER, which
+    # Setup offers and which became English): the line as SUPPORTED has it, its first word the locale's name
+    supported = [l.strip() for l in open(f"{TARGET}/usr/share/i18n/SUPPORTED").read().splitlines()]
+    line = next((l for l in supported if l in (f"{lang}.UTF-8 UTF-8", f"{lang} UTF-8")), "en_GB.UTF-8 UTF-8")
+    locale = line.split()[0]
     with open(f"{TARGET}/etc/locale.gen", "a") as f:
-        f.write(f"\n{locale} UTF-8\n")
+        f.write(f"\n{line}\n")
     chroot("locale-gen")
     with open(f"{TARGET}/etc/locale.conf", "w") as f:
         f.write(f"LANG={locale}\n")
@@ -471,9 +474,12 @@ def account(answers):
     # the first boot as the owner's every boot: the splash, the compositor and the lock show the person's still, made from
     # their wallpaper (switchwall.sh does it on every change); a new account's is Tacit's own, dusk.jpg. Not fatal: the
     # first start makes it too
-    subprocess.run(["arch-chroot", TARGET, "runuser", "-u", user, "--", "env", f"HOME=/home/{user}",
-                    "/usr/lib/tacit/tacit-boot-ground", "--wallpaper", "/usr/share/tacit/shell/assets/wallpapers/dusk.jpg"],
-                   capture_output=True, timeout=120)
+    try:
+        subprocess.run(["arch-chroot", TARGET, "runuser", "-u", user, "--", "env", f"HOME=/home/{user}",
+                        "/usr/lib/tacit/tacit-boot-ground", "--wallpaper", "/usr/share/tacit/shell/assets/wallpapers/dusk.jpg"],
+                       capture_output=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        pass    # it was failing the whole install at its last step
     # whether to send a report when something breaks, as answered in Setup, for the reporter to read
     os.makedirs(f"{TARGET}/var/lib/tacit", exist_ok=True)
     with open(f"{TARGET}/var/lib/tacit/reports", "w") as f:
