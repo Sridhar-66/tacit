@@ -333,7 +333,26 @@ Singleton {
     // never leaves the centre, and every state is a pair of equal wings around it. The
     // container morphs to these numbers the moment the state changes; content lands into the
     // shape afterwards, so nothing here may depend on the loaded content's size.
-    readonly property real centreWidth: 116 + (root.ambientGlyph !== "" ? 30 : 0)
+    // 116 fits the clock's "00:00"; a 12-hour format ("10:33 AM") widens the middle by what its time needs more, or
+    // the wings land on it (Discord 2026-10-21: "AM" over the volume bar)
+    readonly property real centreWidth: 116 + Math.max(0, root.clockWidth - Math.ceil(clock24.advanceWidth)) + (root.ambientGlyph !== "" ? 30 : 0)
+    // The clock's box (StripClock): the widest time the format shows, digits as 0 (tabular), so nothing moves as the
+    // minutes change. 10:58 gives two hour digits in every format, and AM, the wider of AM and PM.
+    readonly property string clockSample: Qt.locale().toString(new Date(2000, 0, 1, 10, 58), Config.options?.time.format ?? "hh:mm").replace(/[0-9]/g, "0")
+    readonly property real clockWidth: Math.ceil(clockWide.advanceWidth)
+    TextMetrics {
+        id: clockWide
+        font.family: Appearance.font.family.numbers
+        font.pixelSize: 16
+        font.variableAxes: ({ "wght": 500 })
+        font.features: ({ "tnum": 1 })
+        text: root.clockSample
+    }
+    TextMetrics {
+        id: clock24
+        font: clockWide.font
+        text: "00:00"
+    }
 
     // Wings are always symmetric around the clock, which never moves (boring.notch HUD: icon
     // left, value right). A running timer at rest: glyph left, time left right (48); with

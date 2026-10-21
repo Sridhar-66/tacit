@@ -3,7 +3,8 @@ import qs.modules.common
 import qs.modules.common.widgets
 import qs.services
 
-// The notch's time: tabular figures in a box sized from "00:00", so nothing beside it moves as the minutes change. A
+// The notch's time: tabular figures in a box sized from the widest time its format shows (IslandController.clockSample),
+// so nothing beside it moves as the minutes change. A
 // changed digit rolls up like a counter (the rightmost first, the next 40 ms later): the old one leaves as the new one
 // arrives, in step, inside a window the height of the figures, so the two never overlap.
 Item {
@@ -50,7 +51,7 @@ Item {
     TextMetrics {
         id: metrics
         font: face.font
-        text: "00:00"
+        text: IslandController.clockSample
     }
     Row {
         anchors.horizontalCenter: parent.horizontalCenter

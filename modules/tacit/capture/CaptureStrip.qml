@@ -1,6 +1,7 @@
 import qs.modules.common
 import qs.modules.common.widgets
 import qs.modules.common.functions
+import qs.services
 import QtQuick
 
 // The notch speaking while a region is being chosen: the same shape over the notch (DockedRect
@@ -29,8 +30,8 @@ Item {
     signal closeRequested
 
     readonly property real edgeInset: 22
-    // Clear of the time in the centre.
-    readonly property real centreHalf: 40
+    // Clear of the time in the centre, a 12-hour one ("10:33 AM") too.
+    readonly property real centreHalf: Math.max(40, IslandController.clockWidth / 2 + 10)
 
     x: (parent.width - width) / 2
     y: topMargin
