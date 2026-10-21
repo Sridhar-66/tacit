@@ -388,9 +388,12 @@ Singleton {
             // The same notification again within a day - the phone re-sends what it still holds on every reconnect (17 Gmail
             // in 2 s), its battery warning came 4 times - takes the earlier one's place and time: no popup, not unread
             // again, not a second row. The earlier one is only forgotten, not dismissed: a dismissal would clear it on the phone.
+            // Only the phone gets the day: from any other app the same words again are a new message (a second "ok" in a
+            // chat was swallowed), so only an exact repeat within 10 s, an app sending twice, folds into the first.
             const sameKey = n => `${n.appName}\n${n.summary}\n${NotificationUtils.tidyBody(n.body)}`;
             const key = sameKey(newNotifObject);
-            const at = root.list.findIndex(n => Date.now() - n.time < 86400000 && sameKey(n) === key);
+            const within = (notification.desktopEntry ?? "") === "org.kde.kdeconnect.daemon" ? 86400000 : 10000;
+            const at = root.list.findIndex(n => Date.now() - n.time < within && sameKey(n) === key);
             const earlier = at >= 0 ? root.list[at] : null;
             const showing = !!earlier && earlier.popup && !earlier.leaving;   // a double send while the first is still up
             if (earlier) {
