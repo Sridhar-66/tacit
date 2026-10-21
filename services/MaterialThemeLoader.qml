@@ -81,6 +81,22 @@ Singleton {
         }
     }
 
+    // A colors.json that is not there yet (a new account's first session: matugen makes its folder on its first run) has
+    // no file to watch, and the re-arm above waits for a wallpaper change that an accent change never makes, so the
+    // desktop kept the built-in colours until a relogin (Discord, Noid). Look again every 2 s until it loads.
+    property string missingPath: ""
+    Timer {
+        id: missingRetry
+        interval: 2000
+        repeat: true
+        running: root.missingPath.length > 0
+        onTriggered: {
+            const p = root.missingPath;
+            root.filePath = "";
+            root.filePath = p;
+        }
+    }
+
     Timer {
         id: delayedFileRead
         interval: Config.options?.hacks?.arbitraryRaceConditionDelay ?? 100
@@ -100,6 +116,8 @@ Singleton {
             delayedFileRead.start()
         }
         onLoadedChanged: {
+            if (themeFileView.loaded)
+                root.missingPath = ""
             const fileContent = themeFileView.text()
             root.applyColors(fileContent)
         }
@@ -108,7 +126,7 @@ Singleton {
         // missing file. The `filePath` guard keeps useLockTheme()/useLiveTheme(), which blank
         // filePath for one tick to force a reload, from firing a false alarm.
         onLoadFailed: error => {
-            if (root.filePath.length > 0) {
+            if (root.filePath.length > 0 && root.missingPath !== root.filePath) {
                 console.error("[MaterialThemeLoader] COULD NOT LOAD THE GENERATED MATERIAL COLOUR SCHEME.");
                 console.error(`[MaterialThemeLoader]   missing or unreadable file: ${root.filePath}`);
                 console.error(`[MaterialThemeLoader]   FileView error code: ${error}`);
@@ -116,6 +134,8 @@ Singleton {
                 console.error(`[MaterialThemeLoader]   Regenerate it by running ${Directories.wallpaperSwitchScriptPath}, or by picking a wallpaper.`);
             }
             root.resetFilePathNextTime();
+            if (root.filePath.length > 0)
+                root.missingPath = root.filePath;
         }
     }
 }
