@@ -19,14 +19,15 @@ Item {
     id: root
 
     // "idle", "open", "address" (the browser's Ctrl+L sheet), "signin" (its sign-in holds the sheet), "signinPeek"
-    // (the sign-in breathing in), "signinWait" (it waits as a wing), or a peek name.
+    // (the sign-in breathing in), "signinWait" (it waits as a wing), "recordSheet" (the recording's choice or card),
+    // or a peek name.
     property string notchState: "idle"
     property string loadedState: "idle"
     readonly property real wing: IslandController.wingFor(root.loadedState)
     readonly property string glyph: IslandController.ambientGlyph
     readonly property bool isDot: root.glyph === "circle"
     // a peek shows its point: the time and the status glyph step back to meta
-    readonly property bool pointShown: !["idle", "open", "address", "signin", "signinPeek", "signinWait", "notAnswering"].includes(root.loadedState)
+    readonly property bool pointShown: !["idle", "open", "address", "signin", "signinPeek", "signinWait", "notAnswering", "recordSheet"].includes(root.loadedState)
 
     implicitHeight: 34
 
@@ -81,20 +82,97 @@ Item {
     // ---------------------------------------------------------------- centre
     // The time alone at the notch's exact middle (the owner, 2026-10-15: centred as a pair with the status glyph it sat
     // 14 px off, and with the glyph hanging beside it the pair read right-heavy); the status glyph sits at the right edge.
+    // While a screen recording runs, its time takes the clock's place: the red dot, the time, and Stop under the hand
+    // (mock ~/dev/tacit-site/mocks/record/); a click on the notch at rest, or on the time, stops it (liveArea below).
     Item {
         id: centre
-        x: Math.round((root.width - clockFace.width) / 2)
-        width: clockFace.width
+        readonly property bool live: IslandController.recording
+        x: Math.round((root.width - width) / 2)
+        width: centre.live ? liveRow.width : clockFace.width
         height: parent.height
         // under the workspace sheet, which draws this same centre in the same place
         visible: !GlobalStates.gridOver
 
         StripClock {
             id: clockFace
+            anchors.horizontalCenter: parent.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
             back: root.pointShown
+            opacity: centre.live ? 0 : 1
+            visible: opacity > 0
+            Behavior on opacity {
+                NumberAnimation { duration: 160 }
+            }
+        }
+
+        Row {
+            id: liveRow
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 8
+            opacity: centre.live ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity {
+                NumberAnimation { duration: 160 }
+            }
+            Item {
+                width: 9
+                height: 9
+                anchors.verticalCenter: parent.verticalCenter
+                // the mock's glow: a wider, fainter disc under the dot
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 15
+                    height: 15
+                    radius: 7.5
+                    color: Qt.alpha(root.recordRed, 0.22)
+                }
+                Rectangle {
+                    id: liveDot
+                    anchors.fill: parent
+                    radius: 4.5
+                    color: root.recordRed
+                    // three breaths as it starts, then still (an endless one repaints the notch every frame)
+                    SequentialAnimation {
+                        running: centre.live
+                        loops: 3
+                        NumberAnimation { target: liveDot; property: "opacity"; to: 0.55; duration: 1300; easing.type: Easing.InOutSine }
+                        NumberAnimation { target: liveDot; property: "opacity"; to: 1; duration: 1300; easing.type: Easing.InOutSine }
+                    }
+                }
+            }
+            StyledText {
+                anchors.verticalCenter: parent.verticalCenter
+                text: IslandController.recordElapsed
+                font.family: Appearance.font.family.numbers
+                font.pixelSize: 16
+                font.variableAxes: ({ "wght": 500 })
+                font.features: ({ "tnum": 1 })
+                color: Tacit.inkMain
+            }
+            Item {
+                anchors.verticalCenter: parent.verticalCenter
+                width: liveArea.containsMouse ? stopWord.implicitWidth : 0
+                height: stopWord.implicitHeight
+                clip: true
+                visible: width > 0
+                Behavior on width {
+                    NumberAnimation { duration: 300; easing.type: Easing.BezierSpline; easing.bezierCurve: Appearance.animationCurves.expressiveFastSpatial }
+                }
+                StripWords {
+                    id: stopWord
+                    text: "Stop"
+                    point: true
+                    color: Tacit.accent
+                    opacity: liveArea.containsMouse ? 1 : 0
+                    Behavior on opacity {
+                        NumberAnimation { duration: 200 }
+                    }
+                }
+            }
         }
     }
+    readonly property color recordRed: "#e8705e"
 
     // Status slot: recording, mic, dnd, charging, timer, unread - in that order. At the right edge, the right side
     // ending 8 px before it; in the open sheet's header (and the address bar's, the sign-in's) that edge is the battery's
@@ -105,7 +183,7 @@ Item {
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         active: root.glyph !== ""
-        visible: active && !GlobalStates.gridOver && !["open", "address", "signin", "signinPeek", "signinWait"].includes(root.loadedState)
+        visible: active && !GlobalStates.gridOver && !["open", "address", "signin", "signinPeek", "signinWait", "recordSheet"].includes(root.loadedState)
 
         sourceComponent: MaterialSymbol {
             id: statusGlyph
@@ -150,12 +228,16 @@ Item {
         }
     }
 
-    // the recording's red dot is its stop: a click on it ends the recording
+    // a recording's stop: the whole notch at rest, the time alone when a peek or the sheet has wings beside it. Under
+    // the wings, so their own controls keep their clicks.
     MouseArea {
-        anchors.centerIn: statusSlot
-        width: 30
-        height: 30
-        visible: statusSlot.visible && root.glyph === "fiber_manual_record"
+        id: liveArea
+        readonly property bool whole: root.loadedState === "idle"
+        visible: centre.live && centre.visible
+        x: liveArea.whole ? 0 : centre.x - 6
+        width: liveArea.whole ? root.width : centre.width + 12
+        height: root.height
+        hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: IslandController.stopRecording()
     }
@@ -230,6 +312,7 @@ Item {
         case "notification":
             return notificationTextWing;
         case "notAnswering":    // the prompt under the header says it all
+        case "recordSheet":     // the time alone over the recording's choice or card
             return null;
         case "flow":            // with the sand, no words; without it, "Listening"
             return IslandController.sandReady ? null : messageTextWing;
@@ -295,8 +378,6 @@ Item {
             return undoPillWing;
         case "window":
             return IslandController.payload?.pill ? windowPillWing : messageGlyphWing;
-        case "record":
-            return recordPillWing;
         case "update":
             return updateAnswerWing;
         case "updated":
@@ -308,6 +389,7 @@ Item {
                 return null;
             return IslandController.payload?.writing ? flowWritingWing : flowLevelWing;
         case "notAnswering":
+        case "recordSheet":
             return null;
         }
         return messageGlyphWing;
@@ -729,23 +811,6 @@ Item {
                 text: "Undo"
                 ring: true
                 action: () => IslandController.wallpaperUndo()
-            }
-        }
-    }
-
-    // -- a recording: its Stop (the red dot in the status slot stops it as well)
-    Component {
-        id: recordPillWing
-        Item {
-            StripPill {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Stop"
-                ring: true
-                action: () => {
-                    IslandController.dismiss();
-                    IslandController.stopRecording();
-                }
             }
         }
     }

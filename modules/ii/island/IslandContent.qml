@@ -37,6 +37,9 @@ Item {
     property bool dragOver: false
     property bool droppedThisDrag: false
     property string view: "home"
+    // the recording's sheet (states/IslandRecord.qml): "choose" from Super+Shift+R, "saved" when one has just ended
+    property string recordMode: "choose"
+    property bool recordActed: false
     // A tile being dragged OUT of the shelf keeps the sheet open until the drag ends, and a
     // sheet opened for a drop on the desktop stays until the pointer has visited it.
     property bool rowDragging: false  // a recents row being dragged out
@@ -59,7 +62,7 @@ Item {
     onAskOpenChanged: if (root.keyScreen) Claude.sheetOpen = root.askOpen;
     // Another screen just took the keyboard: this notch's key-driven sheet is not the one being
     // typed into any more, so it does not stay open behind it.
-    onKeyScreenChanged: if (!root.keyScreen && root.open && (root.view === "ask" || root.view === "address")) root.open = false;
+    onKeyScreenChanged: if (!root.keyScreen && root.open && (root.view === "ask" || root.view === "address" || root.view === "record")) root.open = false;
     // Locking destroys this window with the sheet still up, and the flag would stay set with
     // nothing left to clear it - Claude would never read its context again.
     Component.onDestruction: if (root.askOpen && root.keyScreen) Claude.sheetOpen = false;
@@ -72,6 +75,11 @@ Item {
             root.selected = -1;
             if (root.keyScreen)
                 IslandController.keyboard = false;
+            // the card went unused: it folds away into a line
+            if (root.view === "record" && root.recordMode === "saved" && !root.recordActed && root.keyScreen) {
+                const dir = Persistent.states.record.file.replace(/\/[^\/]*$/, "").replace(/^.*\//, "");
+                IslandController.request("recordSaved", { "text": `Recording saved · in ${dir}`, "icon": "movie" }, 60);
+            }
         } else if (IslandController.keyboard && root.view !== "ask" && root.view !== "address" && root.view !== "signin") {
             root.selected = root.rowCount > 0 ? 0 : -1;
             root.forceActiveFocus();
@@ -85,11 +93,13 @@ Item {
         // way - but Escape has to work wherever focus sits inside the sheet (a question
         // card's own text field, for one), or the sheet cannot be closed at all. So does the
         // browser's address.
-        if (root.view === "ask" || root.view === "address") {
+        if (root.view === "ask" || root.view === "address" || root.view === "record") {
             if (event.key === Qt.Key_Escape) {
                 root.pinnedUntilVisit = false;
                 root.open = false;
                 event.accepted = true;
+            } else if (root.view === "record" && sheetLoader.item?.keyPressed) {
+                sheetLoader.item.keyPressed(event);
             }
             return;
         }
@@ -151,11 +161,11 @@ Item {
     onPeekShowingChanged: {
         if (root.peekShowing)
             hoverTimer.stop();
-        else if (islandHover.hovered && Config.options.island.hoverExpand)
+        else if (islandHover.hovered && Config.options.island.hoverExpand && !IslandController.recording)
             hoverTimer.restart();
     }
     readonly property string headerState: root.open
-        ? (root.view === "address" ? "address" : root.view === "signin" ? "signin" : "open")
+        ? (root.view === "address" ? "address" : root.view === "signin" ? "signin" : root.view === "record" ? "recordSheet" : "open")
         : root.signinStage === "breath" ? "signinPeek"
         : (root.peekShowing ? IslandController.transientState : (root.signinWaiting ? "signinWait" : "idle"))
 
@@ -179,7 +189,7 @@ Item {
         ? (root.sheetSettled ? Appearance.animationCurves.standard : Appearance.animationCurves.expressiveDefaultSpatial)
         : (root.peekShowing || root.signinStage === "breath" ? Appearance.animationCurves.expressiveFastSpatial : Appearance.animationCurves.emphasizedDecel)
 
-    implicitWidth: root.open ? (root.view === "ask" ? 600 : root.view === "address" ? 680 : root.view === "signin" ? IslandController.signinSheetWidth : root.openGeometry.w) : root.headerGeometry.w
+    implicitWidth: root.open ? (root.view === "ask" ? 600 : root.view === "address" ? 680 : root.view === "signin" ? IslandController.signinSheetWidth : root.view === "record" ? (root.recordMode === "saved" ? 520 : 660) : root.openGeometry.w) : root.headerGeometry.w
     // Ask's height follows its content (a field, suggestions, then a conversation), up to the
     // sheets' 440. It opens on the springs below; once open, a streaming answer changes it every
     // line, and a NumberAnimation restarts from rest at each new target (the notch stalled and
@@ -260,7 +270,7 @@ Item {
         if (!root.signinHere || IslandController.signinPhase === "" || root.signinStage !== "")
             return;
         // Ask, the shelf or the address in use: it waits as a wing; the home or media sheet from a hover: it takes it
-        if (root.open && ["ask", "address", "shelf"].includes(root.view)) {
+        if (root.open && ["ask", "address", "shelf", "record"].includes(root.view)) {
             IslandController.signinWait("busy");
             return;
         }
@@ -414,7 +424,7 @@ Item {
     // animated value is clamped here or the compositor slices the bottom of a streaming answer.
     // an app not answering: the prompt's body under the header
     readonly property real promptHeight: root.peekShowing && root.headerState === "notAnswering" ? 108 : 0
-    implicitHeight: root.askFollowing ? 34 + Math.min(root.askRoom, root.askSmooth) : 34 + root.promptHeight + (root.open ? (root.view === "shelf" ? 150 + IslandController.openRowsHeight + (root.timerRunning ? 36 : 0) : root.view === "ask" ? root.askHeight : root.view === "address" ? root.addressHeight : root.view === "signin" ? IslandController.signinSheetHeight - 34 : root.openGeometry.h) : 0)
+    implicitHeight: root.askFollowing ? 34 + Math.min(root.askRoom, root.askSmooth) : 34 + root.promptHeight + (root.open ? (root.view === "shelf" ? 150 + IslandController.openRowsHeight + (root.timerRunning ? 36 : 0) : root.view === "ask" ? root.askHeight : root.view === "address" ? root.addressHeight : root.view === "signin" ? IslandController.signinSheetHeight - 34 : root.view === "record" ? (root.recordMode === "saved" ? 94 : 82) : root.openGeometry.h) : 0)
 
     Behavior on implicitWidth {
         NumberAnimation {
@@ -462,6 +472,9 @@ Item {
         const g = Qt.createComponent(Qt.resolvedUrl("states/IslandSignin.qml"), Component.Asynchronous);
         g.statusChanged.connect(() => { if (g.status === Component.Error) console.warn("[Island] Sign-in:", g.errorString()); });
         root.warmStates.push(g);
+        const r = Qt.createComponent(Qt.resolvedUrl("states/IslandRecord.qml"), Component.Asynchronous);
+        r.statusChanged.connect(() => { if (r.status === Component.Error) console.warn("[Island] Record:", r.errorString()); });
+        root.warmStates.push(r);
     }
 
     // The browser's address floats over the page (its render): a soft shadow under the sheet.
@@ -544,8 +557,9 @@ Item {
                     root.pinnedUntilVisit = false;
                     pinTimer.stop();
                 }
-                // boring.notch: hovering a sneak peek does not open the notch.
-                if (Config.options.island.hoverExpand && !root.peekShowing)
+                // boring.notch: hovering a sneak peek does not open the notch. Nor does hovering a recording: the
+                // resting notch is its Stop.
+                if (Config.options.island.hoverExpand && !root.peekShowing && !IslandController.recording)
                     hoverTimer.restart();
             } else {
                 hoverTimer.stop();
@@ -558,7 +572,7 @@ Item {
         id: hoverTimer
         interval: 300
         repeat: false
-        onTriggered: root.openSheet()
+        onTriggered: if (!IslandController.recording && !IslandController.recordArming) root.openSheet()
     }
 
     function openSheet() {
@@ -585,6 +599,8 @@ Item {
         if (root.draggingOut || root.pinnedUntilVisit)
             return;
         if ((root.view === "ask" || root.view === "address" || root.view === "signin") && root.open)   // Ask, the address and the sign-in close when you say so (Esc, ↗, the shortcut, the way back), not on leave
+            return;
+        if (root.view === "record" && root.recordMode === "choose" && root.open)   // so does the recording's choice
             return;
         root.open = false;
     }
@@ -656,6 +672,42 @@ Item {
             root.open = true;
             if (sheetLoader.item && sheetLoader.item.focusInput)
                 sheetLoader.item.focusInput();
+        }
+
+        // Super+Shift+R: the recording's choice, with the keyboard; the key again puts it away
+        function onRecordRequested() {
+            if (!root.keyScreen)
+                return;
+            pinTimer.stop();
+            root.pinnedUntilVisit = false;
+            if (root.signinShown || root.signinStage === "breath") {
+                root.signinFold(() => { IslandController.signinWait("ask"); root.recordMode = "choose"; root.signinYield("record"); });
+                return;
+            }
+            if (root.open && root.view === "record" && root.recordMode === "choose") {
+                root.open = false;
+                return;
+            }
+            root.recordMode = "choose";
+            root.view = "record";
+            root.open = true;
+            root.forceActiveFocus();
+        }
+
+        // a recording ended: its card, until the pointer has come and gone (or 6 s); over another open sheet only the line
+        function onRecordSaved() {
+            if (!root.keyScreen)
+                return;
+            if (root.open || root.signinShown || root.signinStage !== "") {
+                IslandController.request("recordSaved", { "text": "Recording saved", "icon": "movie" }, 60);
+                return;
+            }
+            root.recordActed = false;
+            root.recordMode = "saved";
+            root.view = "record";
+            root.open = true;
+            root.pinnedUntilVisit = true;
+            pinTimer.restart();
         }
 
         // the shortcut again, with nothing new to attach, puts Ask away
@@ -866,7 +918,7 @@ Item {
             // fold() refuses to close Ask on purpose, so that leaving with the pointer does
             // not throw away a half-typed question. Escape is an explicit ask to close, and
             // it is the only way out while the sheet holds the keyboard: close it here.
-            if ((root.view === "ask" || root.view === "address") && root.open) {
+            if ((root.view === "ask" || root.view === "address" || root.view === "record") && root.open) {
                 root.pinnedUntilVisit = false;
                 root.open = false;
                 return;
@@ -1007,18 +1059,25 @@ Item {
             Loader {
                 id: sheetLoader
                 anchors.fill: parent
-                anchors.bottomMargin: root.view === "ask" || root.view === "address" || root.view === "signin" ? 0 : (root.timerRunning ? 38 : 0) + IslandController.openRowsHeight
+                anchors.bottomMargin: root.view === "ask" || root.view === "address" || root.view === "signin" || root.view === "record" ? 0 : (root.timerRunning ? 38 : 0) + IslandController.openRowsHeight
                 active: root.open || sheetHolder.opacity > 0
                 // Ask's height follows its item, so an asynchronous load opens the sheet to the
                 // 150px placeholder and re-animates when the item lands. Its component is
                 // pre-compiled above, so loading it in place costs nothing visible. The address
                 // takes keys from the first frame, so it loads in place too.
-                asynchronous: root.view !== "ask" && root.view !== "address" && root.view !== "signin"
-                source: root.view === "shelf" ? "states/IslandShelf.qml" : root.view === "ask" ? "states/IslandAsk.qml" : root.view === "address" ? "states/IslandAddress.qml" : root.view === "signin" ? "states/IslandSignin.qml" : "states/IslandSheet.qml"
+                asynchronous: root.view !== "ask" && root.view !== "address" && root.view !== "signin" && root.view !== "record"
+                source: root.view === "shelf" ? "states/IslandShelf.qml" : root.view === "ask" ? "states/IslandAsk.qml" : root.view === "address" ? "states/IslandAddress.qml" : root.view === "signin" ? "states/IslandSignin.qml" : root.view === "record" ? "states/IslandRecord.qml" : "states/IslandSheet.qml"
                 onLoaded: {
                     if (root.view === "ask" || root.view === "address") {
                         item.close.connect(() => { root.pinnedUntilVisit = false; root.open = false; });
                         item.focusInput();
+                    }
+                    if (root.view === "record") {
+                        item.mode = Qt.binding(() => root.recordMode);
+                        item.screenName = root.screenData?.name ?? "";
+                        item.dragProxy = dragProxy;
+                        item.close.connect(() => { root.pinnedUntilVisit = false; root.open = false; });
+                        item.acted.connect(() => root.recordActed = true);
                     }
                     if (root.view === "home") {
                         item.raise.connect(() => root.fold());
@@ -1042,7 +1101,7 @@ Item {
             // A click focuses the session's window and folds the notch.
             Column {
                 id: sessionRows
-                visible: root.view !== "ask" && root.view !== "address" && root.view !== "signin"
+                visible: root.view !== "ask" && root.view !== "address" && root.view !== "signin" && root.view !== "record"
                 anchors.left: parent.left
                 anchors.leftMargin: 20
                 anchors.right: parent.right
@@ -1397,7 +1456,7 @@ Item {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 8
                 height: 30
-                visible: root.timerRunning && root.view !== "ask" && root.view !== "address" && root.view !== "signin"
+                visible: root.timerRunning && root.view !== "ask" && root.view !== "address" && root.view !== "signin" && root.view !== "record"
 
                 readonly property bool pomodoro: TimerService.pomodoroRunning
                 readonly property int secondsLeft: pomodoro ? TimerService.pomodoroSecondsLeft : TimerService.countdownSecondsLeft

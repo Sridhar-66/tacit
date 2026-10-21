@@ -17,7 +17,8 @@ PanelWindow {
     color: "transparent"
     WlrLayershell.namespace: "quickshell:regionSelector"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
+    // a recording's frame (Post) takes no keys: the person goes on typing in what is being recorded
+    WlrLayershell.keyboardFocus: root.phase === RegionSelection.Phase.Post ? WlrKeyboardFocus.None : WlrKeyboardFocus.OnDemand
     exclusionMode: ExclusionMode.Ignore
     anchors {
         left: true
@@ -33,6 +34,10 @@ PanelWindow {
     property var action: RegionSelection.SnipAction.Copy
     property var selectionMode: RegionSelection.SelectionMode.RectCorners
     property var phase: RegionSelection.Phase.Select
+    // recording (the notch's choice, IslandController): a window only, the window under the hand lit with "Record
+    // <App>"; else an area, held after the drag with its size and Cancel · Record until one is pressed
+    property bool recordWindow: false
+    property bool recordReady: false
     signal dismiss()
 
     // Styles
@@ -123,9 +128,9 @@ PanelWindow {
 
     // Config
     property bool isCircleSelection: (root.selectionMode === RegionSelection.SelectionMode.Circle)
-    property bool enableWindowRegions: Config.options.regionSelector.targetRegions.windows && !isCircleSelection
-    property bool enableLayerRegions: Config.options.regionSelector.targetRegions.layers && !isCircleSelection
-    property bool enableContentRegions: Config.options.regionSelector.targetRegions.content
+    property bool enableWindowRegions: (Config.options.regionSelector.targetRegions.windows || root.recordWindow) && !isCircleSelection
+    property bool enableLayerRegions: Config.options.regionSelector.targetRegions.layers && !isCircleSelection && !root.isRecording
+    property bool enableContentRegions: Config.options.regionSelector.targetRegions.content && !root.isRecording
 
     // Target
     property real targetedRegionX: -1
@@ -254,7 +259,7 @@ PanelWindow {
     // The dim's hole: the selection while one is drawn, else the window or region the pointer is over.
     readonly property rect litRect: {
         if (root.isCircleSelection) return Qt.rect(0, 0, 0, 0);
-        if (root.phase === RegionSelection.Phase.Post || root.draggedAway)
+        if (root.phase === RegionSelection.Phase.Post || root.draggedAway || root.recordReady)
             return Qt.rect(root.regionX, root.regionY, root.regionWidth, root.regionHeight);
         if (root.targetedRegionValid())
             return Qt.rect(root.targetedRegionX, root.targetedRegionY, root.targetedRegionWidth, root.targetedRegionHeight);
@@ -308,6 +313,9 @@ PanelWindow {
         function onEnableChanged() {
             if (!Persistent.states.record.enable && root.isRecording) {
                 root.dismiss();
+            } else if (Persistent.states.record.enable && root.phase === RegionSelection.Phase.Select) {
+                // another screen's selection is being recorded: this one's frozen picture goes
+                root.visible = false;
             }
         }
     }
@@ -359,6 +367,51 @@ PanelWindow {
                 root.dismiss();
                 return;
         }
+    }
+
+    // A recording's area: the drag's box follows the hand again after a click snapped it to a window
+    function followDrag() {
+        root.regionWidth = Qt.binding(() => Math.abs(root.draggingX - root.dragStartX));
+        root.regionHeight = Qt.binding(() => Math.abs(root.draggingY - root.dragStartY));
+        root.regionX = Qt.binding(() => Math.min(root.dragStartX, root.draggingX));
+        root.regionY = Qt.binding(() => Math.min(root.dragStartY, root.draggingY));
+    }
+    function recordReleased() {
+        root.dragging = false;
+        const click = root.draggingX === root.dragStartX && root.draggingY === root.dragStartY;
+        if (click) {
+            if (!root.targetedRegionValid())
+                return;
+            if (root.recordWindow) {
+                root.recordTargeted();
+                return;
+            }
+            root.setRegionToTargeted();
+        }
+        root.recordReady = root.regionWidth > 20 && root.regionHeight > 20;
+    }
+    // a window as it is, without the padding a screenshot gets
+    function recordTargeted() {
+        root.regionX = root.targetedRegionX;
+        root.regionY = root.targetedRegionY;
+        root.regionWidth = root.targetedRegionWidth;
+        root.regionHeight = root.targetedRegionHeight;
+        root.record();
+    }
+    // Starts it: wf-recorder takes the box in the layout's logical coordinates, and an even size (yuv420p)
+    function record() {
+        const x = Math.max(0, Math.min(root.regionX, root.screen.width - 2));
+        const y = Math.max(0, Math.min(root.regionY, root.screen.height - 2));
+        const w = Math.floor(Math.min(root.regionWidth, root.screen.width - x) / 2) * 2;
+        const h = Math.floor(Math.min(root.regionHeight, root.screen.height - y) / 2) * 2;
+        root.regionX = x;
+        root.regionY = y;
+        root.regionWidth = w;
+        root.regionHeight = h;
+        IslandController.startRecording(["--region", `${Math.round(root.monitorOffsetX + x)},${Math.round(root.monitorOffsetY + y)} ${w}x${h}`]);
+        root.recordReady = false;
+        root.phase = RegionSelection.Phase.Post;
+        root.selectionMode = RegionSelection.SelectionMode.RectCorners;
     }
 
     // Execution after selection
@@ -430,6 +483,8 @@ PanelWindow {
         Keys.onPressed: (event) => { // Esc to close
             if (event.key === Qt.Key_Escape) {
                 Qt.callLater(root.dismiss);
+            } else if (root.recordReady && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+                root.record();
             }
         }
     }
@@ -443,6 +498,16 @@ PanelWindow {
 
         // Controls
         onPressed: (mouse) => {
+            if (root.isRecording) {
+                root.recordReady = false;
+                if (root.recordWindow) {
+                    // a click picks a window; nothing is drawn
+                    root.dragStartX = root.draggingX = mouse.x;
+                    root.dragStartY = root.draggingY = mouse.y;
+                    return;
+                }
+                root.followDrag();
+            }
             root.dragStartX = mouse.x;
             root.dragStartY = mouse.y;
             root.draggingX = mouse.x;
@@ -451,6 +516,10 @@ PanelWindow {
             root.mouseButton = mouse.button;
         }
         onReleased: (mouse) => {
+            if (root.isRecording) {
+                root.recordReleased();
+                return;
+            }
             // Detect if it was a click -> Try to select targeted region
             if (root.draggingX === root.dragStartX && root.draggingY === root.dragStartY) {
                 if (root.targetedRegionValid()) {
@@ -493,6 +562,7 @@ PanelWindow {
                 regionHeight: root.regionHeight
                 mouseX: mouseArea.mouseX
                 mouseY: mouseArea.mouseY
+                showAimLines: Config.options.regionSelector.rect.showAimLines && !root.isRecording
                 color: root.selectionBorderColor
                 overlayColor: root.overlayColor
                 lit: root.litRect
@@ -517,7 +587,7 @@ PanelWindow {
         Repeater {
             model: ScriptModel {
                 values: {
-                    if (root.phase === RegionSelection.Phase.Select && root.enableWindowRegions) {
+                    if (root.phase === RegionSelection.Phase.Select && root.enableWindowRegions && !root.recordReady) {
                         return root.windowRegions
                     } else {
                         return []
@@ -598,11 +668,68 @@ PanelWindow {
         }
 
         // The mode, the hint and the shape live in the notch's strip; nothing follows the cursor.
+        // the recording's area, drawn: its size under it, Cancel and Record at its corner (above it near the bottom)
+        Item {
+            id: readyBar
+            z: 10
+            visible: root.recordReady
+            readonly property bool above: root.regionY + root.regionHeight + 52 > root.height
+            x: root.regionX
+            y: readyBar.above ? root.regionY - 48 : root.regionY + root.regionHeight + 8
+            width: root.regionWidth
+            height: 40
+            StyledText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: readyBar.above ? 22 : 2
+                text: `${Math.round(root.regionWidth)} × ${Math.round(root.regionHeight)}`
+                font.family: Appearance.font.family.condensed
+                font.pixelSize: 13
+                font.features: ({ "tnum": 1 })
+                color: Tacit.inkMeta
+            }
+            Row {
+                anchors.right: parent.right
+                spacing: 6
+                RecordPill {
+                    label: "Cancel"
+                    onPicked: root.dismiss()
+                }
+                RecordPill {
+                    label: "Record"
+                    glyph: "fiber_manual_record"
+                    strong: true
+                    onPicked: root.record()
+                }
+            }
+        }
+
+        // a window to record: the one under the hand, with its name on the way forward
+        Item {
+            z: 10
+            visible: root.recordWindow && root.phase === RegionSelection.Phase.Select && root.targetedRegionValid()
+            x: root.targetedRegionX
+            y: root.targetedRegionY
+            width: root.targetedRegionWidth
+            height: root.targetedRegionHeight
+            RecordPill {
+                anchors.centerIn: parent
+                glyph: "fiber_manual_record"
+                strong: true
+                label: {
+                    const w = root.windowRegions.find(r => r.at[0] === root.targetedRegionX && r.at[1] === root.targetedRegionY);
+                    const cls = w?.class ?? "";
+                    const e = DesktopEntries.byId(cls) ?? DesktopEntries.heuristicLookup(cls);
+                    return `Record ${e?.name || cls || "this window"}`;
+                }
+                onPicked: root.recordTargeted()
+            }
+        }
+
         CaptureStrip {
             id: strip
             z: 10
-            visible: root.phase === RegionSelection.Phase.Select
-            shown: root.visible && root.phase === RegionSelection.Phase.Select
+            visible: root.phase === RegionSelection.Phase.Select && !root.isRecording
+            shown: root.visible && root.phase === RegionSelection.Phase.Select && !root.isRecording
             dragging: root.dragging
             glyph: root.stripGlyph
             hint: root.stripHint
@@ -617,6 +744,46 @@ PanelWindow {
                 root.selectionMode = index === 0 ? RegionSelection.SelectionMode.RectCorners : RegionSelection.SelectionMode.Circle;
             }
             onCloseRequested: root.dismiss()
+        }
+    }
+
+    component RecordPill: Rectangle {
+        id: pill
+        property string label
+        property string glyph: ""
+        property bool strong: false   // the way forward: the accent
+        signal picked()
+        implicitWidth: pillRow.implicitWidth + (pill.glyph !== "" ? 26 : 28)
+        implicitHeight: 34
+        radius: 17
+        color: pill.strong ? Tacit.accent : ColorUtils.transparentize(Tacit.inkMain, pillArea.containsMouse ? 0.8 : 0.88)
+        Row {
+            id: pillRow
+            x: pill.glyph !== "" ? 11 : 14
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 7
+            MaterialSymbol {
+                visible: pill.glyph !== ""
+                anchors.verticalCenter: parent.verticalCenter
+                text: pill.glyph
+                fill: 1
+                iconSize: 15
+                color: pill.strong ? Tacit.onAccent : Tacit.inkSec
+            }
+            StyledText {
+                anchors.verticalCenter: parent.verticalCenter
+                text: pill.label
+                font.pixelSize: 14
+                font.variableAxes: ({ "wght": pill.strong ? 600 : 450 })
+                color: pill.strong ? Tacit.onAccent : Tacit.inkSec
+            }
+        }
+        MouseArea {
+            id: pillArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: pill.picked()
         }
     }
 }

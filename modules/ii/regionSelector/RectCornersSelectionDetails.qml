@@ -15,7 +15,9 @@ Item {
     required property color overlayColor
     property bool showAimLines: Config.options.regionSelector.rect.showAimLines
 
+    // a recording runs: only its frame stays, a red hairline with two corners, outside the box so not in the video
     property bool breathingBorderOnly: false
+    readonly property color recordRed: "#e8705e"
 
     // The dimmed screen, with a hole where the picture stays lit
     property rect lit: Qt.rect(root.regionX, root.regionY, root.regionWidth, root.regionHeight)
@@ -43,15 +45,31 @@ Item {
         height: Math.round(root.regionHeight) + 2
         color: "transparent"
         border.width: 1
-        border.color: root.color
-
-        // Breathing
+        border.color: root.breathingBorderOnly ? Qt.alpha(root.recordRed, 0.7) : root.color
         opacity: 0.9
-        SequentialAnimation on opacity {
-            running: root.breathingBorderOnly
-            loops: Animation.Infinite
-            NumberAnimation { from: 0.9; to: 0.3; duration: 1200; easing.type: Easing.InOutQuad }
-            NumberAnimation { from: 0.3; to: 0.9; duration: 1200; easing.type: Easing.InOutQuad }
+
+        // the recording's corners: top left and bottom right, 14 px, 2 px thick, just outside the hairline
+        Repeater {
+            model: root.breathingBorderOnly ? [0, 1] : []
+            Item {
+                required property int modelData
+                x: modelData === 0 ? -2 : selectionBorder.width - 12
+                y: modelData === 0 ? -2 : selectionBorder.height - 12
+                width: 14
+                height: 14
+                Rectangle {
+                    y: modelData === 0 ? 0 : 12
+                    width: 14
+                    height: 2
+                    color: root.recordRed
+                }
+                Rectangle {
+                    x: modelData === 0 ? 0 : 12
+                    width: 2
+                    height: 14
+                    color: root.recordRed
+                }
+            }
         }
     }
 

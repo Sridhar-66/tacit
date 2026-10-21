@@ -17,6 +17,21 @@ Scope {
 
     property var action: RegionSelection.SnipAction.Copy
     property var selectionMode: RegionSelection.SelectionMode.RectCorners
+    property bool recordWindow: false
+
+    // the notch's recording choice: an area or a window to pick here (IslandController.chooseRecord)
+    Connections {
+        target: GlobalStates
+        function onRecordPickChanged() {
+            if (GlobalStates.recordPick === "")
+                return;
+            root.recordWindow = GlobalStates.recordPick === "window";
+            GlobalStates.recordPick = "";
+            root.action = RegionSelection.SnipAction.Record;
+            root.selectionMode = RegionSelection.SelectionMode.RectCorners;
+            GlobalStates.regionSelectorOpen = true;
+        }
+    }
 
     // The selector freezes the screen behind it. Restored after an unlock it would be a stale
     // picture of the pre-lock desktop swallowing every click, so the lock ends the selection.
@@ -39,6 +54,7 @@ Scope {
                 onDismiss: root.dismiss()
                 action: root.action
                 selectionMode: root.selectionMode
+                recordWindow: root.recordWindow
             }
         }
     }
@@ -88,24 +104,14 @@ Scope {
         GlobalStates.regionSelectorOpen = true
     }
 
+    // the notch asks what to record (or stops the one running); without the notch, the area picker
     function record() {
-        if (Persistent.states.record.enable) {
-            Quickshell.execDetached([Directories.recordScriptPath]);
-            return;
-        }
-        root.action = RegionSelection.SnipAction.Record
-        root.selectionMode = RegionSelection.SelectionMode.RectCorners
-        GlobalStates.regionSelectorOpen = true
+        IslandController.openRecord();
     }
 
     function recordWithSound() {
-        if (Persistent.states.record.enable) {
-            Quickshell.execDetached([Directories.recordScriptPath]);
-            return;
-        }
-        root.action = RegionSelection.SnipAction.RecordWithSound
-        root.selectionMode = RegionSelection.SelectionMode.RectCorners
-        GlobalStates.regionSelectorOpen = true
+        Persistent.states.record.sound = "system";
+        IslandController.openRecord();
     }
 
     IpcHandler {

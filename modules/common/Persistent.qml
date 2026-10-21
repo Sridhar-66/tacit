@@ -93,8 +93,15 @@ Singleton {
                 property bool inhibit: false
             }
 
+            // scripts/videos/record.sh writes enable, file, started, stopped (ms) and thumb; the notch's sheet keeps the choices
             property JsonObject record: JsonObject {
                 property bool enable: false
+                property string file: ""
+                property real started: 0
+                property real stopped: 0
+                property string thumb: ""
+                property string last: "area"     // screen, area, window: what Enter repeats
+                property string sound: "none"    // none, system, mic
             }
 
             property JsonObject overlay: JsonObject {

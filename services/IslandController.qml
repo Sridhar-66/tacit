@@ -169,8 +169,8 @@ Singleton {
             return 15000;
         case "updated":     // its What's new is there to be pressed
             return 10000;
-        case "record":      // Recording, with its Stop
-            return 5000;
+        case "recordSaved":
+            return 2600;
         case "window":      // the window band (WindowBand.qml): each line brings its own hold
             return root.payload?.hold ?? 4000;
         case "download":
@@ -376,8 +376,6 @@ Singleton {
         case "update":      // Tonight and Restart
         case "updated":
             return 204;
-        case "record":
-            return 172;
         case "window":      // with its Reopen, Show or Undo; the hint is words alone
             return root.payload?.pill ? 204 : 182;
         case "flow":
@@ -445,16 +443,89 @@ Singleton {
         group.source?.type === PwNodeType.AudioSource
         && group.target?.type === PwNodeType.AudioInStream
         && !/^(echo-cancel|filter-chain|book4_mic_aec)/.test(group.target?.name ?? ""))
+    // ------------------------------------------------------------------ screen recording
+    // Super+Shift+R opens the sheet's choice (states/IslandRecord.qml): the whole screen, an area or a window, and the
+    // sound. While it records, the time stands where the clock was (IslandHeader) and a click or the key again stops
+    // it; then the sheet shows it on a card and the file waits on the shelf. scripts/videos/record.sh records and
+    // writes the state read here (Persistent.states.record). Approved mock: ~/dev/tacit-site/mocks/record/.
     readonly property bool recording: Persistent.states.record.enable
-    // a recording says so with its Stop (the bar's recorder button used to); the red dot stops it too (IslandHeader)
-    onRecordingChanged: {
-        if (root.recording)
-            root.request("record", { "text": "Recording", "icon": "fiber_manual_record" }, 70);
-        else if (root.transientState === "record")
-            root.dismiss();
+    property real recordNow: Date.now()
+    Timer {
+        running: root.recording
+        interval: 1000
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.recordNow = Date.now()
+    }
+    function clockText(ms) {
+        const s = Math.max(0, Math.floor(ms / 1000));
+        const mm = Math.floor(s / 60) % 60, ss = String(s % 60).padStart(2, "0");
+        return s >= 3600 ? `${Math.floor(s / 3600)}:${String(mm).padStart(2, "0")}:${ss}` : `${mm}:${ss}`;
+    }
+    readonly property string recordElapsed: root.clockText(root.recordNow - Persistent.states.record.started)
+    // the last recording, for its card: how long it ran
+    readonly property string recordLength: root.clockText(Persistent.states.record.stopped - Persistent.states.record.started)
+    signal recordRequested()
+    signal recordSaved()
+    function openRecord() {
+        if (root.recording) {
+            root.stopRecording();
+            return;
+        }
+        // no notch to ask in: the area picker, as before
+        if (!root.enabled || root.suppressed) {
+            GlobalStates.recordPick = "area";
+            return;
+        }
+        root.keyboardScreen = Hyprland.focusedMonitor?.name ?? "";
+        root.keyboard = true;
+        root.recordRequested();
+    }
+    // the sheet's choice, once the sheet has folded out of the picture (the area picker freezes the screen as it
+    // opens); the whole screen is the notch's screen
+    property string recordWhat: ""
+    property string recordScreen: ""
+    // from the choice until it records: the sheet does not open under the pointer left on the notch (IslandContent),
+    // or the whole screen's recording starts with the shelf in it
+    property bool recordArming: false
+    function chooseRecord(what, screenName) {
+        Persistent.states.record.last = what;
+        root.recordWhat = what;
+        root.recordScreen = screenName;
+        root.recordArming = true;
+        armingEnd.restart();
+        recordLater.restart();
+    }
+    Timer {
+        id: armingEnd
+        interval: 5000
+        onTriggered: root.recordArming = false
+    }
+    Timer {
+        id: recordLater
+        interval: 450
+        onTriggered: {
+            if (root.recordWhat === "screen")
+                root.startRecording(["--fullscreen"].concat(root.recordScreen !== "" ? ["--output", root.recordScreen] : []));
+            else
+                GlobalStates.recordPick = root.recordWhat;
+        }
+    }
+    // where: ["--region", "x,y wxh"] (logical, global) or ["--fullscreen", ...]
+    function startRecording(where) {
+        const s = Persistent.states.record.sound;
+        Quickshell.execDetached([Directories.recordScriptPath].concat(where, s === "system" ? ["--sound"] : s === "mic" ? ["--mic"] : []));
     }
     function stopRecording() {
-        Quickshell.execDetached([Directories.recordScriptPath]);
+        Quickshell.execDetached([Directories.recordScriptPath, "--stop"]);
+    }
+    onRecordingChanged: {
+        root.recordArming = false;
+        const file = Persistent.states.record.file;
+        if (root.recording || file === "")
+            return;
+        DropShelf.addItems(["file://" + file]);
+        root.recordSaved();
     }
     // A running timer is a status glyph; the hover strip carries its remaining time and controls.
     readonly property bool timerAmbient: TimerService.pomodoroRunning || TimerService.countdownRunning
@@ -463,8 +534,6 @@ Singleton {
         // (see memory book4-charging). Red, and first - it costs a battery.
         if (root.chargerFault)
             return "battery_alert";
-        if (root.recording)
-            return "fiber_manual_record";
         if (root.micLive)
             return "mic";
         // An agent session is waiting on you (permission or a question).
