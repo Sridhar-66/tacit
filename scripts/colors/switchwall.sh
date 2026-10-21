@@ -326,36 +326,17 @@ switch() {
 
     colors_json_path="$STATE_DIR/user/generated/colors.json"
     colors_lock_json_path="$STATE_DIR/user/generated/colors-lock.json"
-    colors_lock_watch_paths=(
-        "$colors_json_path"
-        "$XDG_CONFIG_HOME/gtk-3.0/gtk.css"
-        "$XDG_CONFIG_HOME/gtk-4.0/gtk.css"
-    )
-    colors_lock_backups=()
     if [[ -n "$colors_lock_flag" ]]; then
-        for i in "${!colors_lock_watch_paths[@]}"; do
-            watch_path="${colors_lock_watch_paths[$i]}"
-            if [[ -f "$watch_path" ]]; then
-                backup_path="$(mktemp)"
-                cp "$watch_path" "$backup_path"
-                colors_lock_backups[$i]="$backup_path"
-            fi
-        done
-    fi
-
-    matugen -c "$MATUGEN_CONFIG" "${matugen_args[@]}"
-
-    if [[ -n "$colors_lock_flag" ]]; then
-        if [[ -f "$colors_json_path" ]]; then
-            cp "$colors_json_path" "$colors_lock_json_path"
-        fi
-        for i in "${!colors_lock_watch_paths[@]}"; do
-            watch_path="${colors_lock_watch_paths[$i]}"
-            backup_path="${colors_lock_backups[$i]:-}"
-            if [[ -n "$backup_path" ]]; then
-                mv "$backup_path" "$watch_path"
-            fi
-        done
+        # the lock picture's palette alone, into colors-lock.json: the whole set (Qt apps, the cursor, nvim, Hyprland's
+        # borders, the browsers' themes) recoloured the desktop in the lock picture's colours until the next wallpaper
+        local m3in lockcfg
+        m3in=$(awk '/^\[templates\.m3colors\]/{f=1;next} /^\[/{f=0} f && /^input_path/{sub(/^input_path *= */,""); gsub(/["\047]/,""); print; exit}' "$MATUGEN_CONFIG")
+        lockcfg=$(mktemp --suffix=.toml)
+        printf "[config]\nversion_check = false\n\n[templates.m3colors]\ninput_path = '%s'\noutput_path = '%s'\n" "$m3in" "$colors_lock_json_path" > "$lockcfg"
+        matugen -c "$lockcfg" "${matugen_args[@]}"
+        rm -f "$lockcfg"
+    else
+        matugen -c "$MATUGEN_CONFIG" "${matugen_args[@]}"
     fi
 
     if ! activate_shell_venv; then
@@ -565,6 +546,8 @@ main() {
 # The boot pictures (the splash's still, the lock's ground, the sky's colours) follow the wallpaper: tacit-boot's
 # tacit-boot-ground once that package is installed, the hand-installed splash's mkassets.sh until then.
 regen_ground() {
+    # the splash and the boot lock are the desktop's: a lock picture's colour pass leaves them (they were baked from it)
+    [[ -n "$colors_lock_flag" ]] && return 0
     local mkassets=/usr/lib/tacit/tacit-boot-ground
     [[ -x "$mkassets" ]] || mkassets="$HOME/book4-edge/martida-boot/mkassets.sh"
     [[ -x "$mkassets" ]] || return 0
