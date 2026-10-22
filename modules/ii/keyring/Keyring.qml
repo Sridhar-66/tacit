@@ -79,9 +79,13 @@ Scope {
     // not it shows yet, the collections are looked at each second; once none is locked it is refused, as Cancel would.
     // Not a new password (choosing one) nor a confirm. The old password of a change (Seahorse's) would count as moot
     // too: nothing in Tacit asks for one.
+    // Only gnome-keyring's own unlock ask, which names its keyring ('... the keyring "Login" ...'): gpg's pinentry and
+    // an ssh key's passphrase come through the same prompter for passwords the keyring never holds, and were refused
+    // as moot within a second (2026-10-22: signing a package always failed with "Operation cancelled").
     readonly property var unlockAsk: {
         const c = DialogBridge.current;
-        return c && c.kind === "keyring.password" && !c.params?.passwordNew ? c : null;
+        return c && c.kind === "keyring.password" && !c.params?.passwordNew
+            && /keyring\s+["“'‘]/i.test(c.params?.description ?? "") ? c : null;
     }
     Timer {
         interval: 1000
