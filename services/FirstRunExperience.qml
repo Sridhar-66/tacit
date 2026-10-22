@@ -29,6 +29,18 @@ Singleton {
         command: ["bash", "-c", 'd="--session --dest org.freedesktop.impl.portal.PermissionStore --object-path /org/freedesktop/impl/portal/PermissionStore --method org.freedesktop.impl.portal.PermissionStore"; case "$(gdbus call $d.Lookup devices camera 2>/dev/null)" in *"\'\': "*) ;; *) gdbus call $d.SetPermission devices true camera "" "[\'yes\']" >/dev/null ;; esac']
     }
 
+    // Tacit's wallpapers, the Horizons (made with code, like dusk), into the folder Settings' Wallpaper and the switcher
+    // show: a new account has no ~/Pictures/Wallpapers, so they offered only the picture in use (Discord 2026-10-21).
+    // Once per account, and only where that folder does not exist yet: one that does is the person's own. Every start
+    // until it is done, so an update brings them to accounts made before.
+    Process {
+        running: true
+        command: ["bash", "-c", '[ -e "$3" ] && exit 0; if [ ! -e "$2" ]; then mkdir -p "$2" && cp -n "$1"/*.jpg "$2"/ || exit 0; fi; mkdir -p "${3%/*}" && touch "$3"',
+            "bash", Quickshell.shellPath("assets/wallpapers/horizons"),
+            `${FileUtils.trimFileProtocol(Directories.pictures)}/Wallpapers`,
+            FileUtils.trimFileProtocol(`${Directories.state}/user/horizons-given`)]
+    }
+
     function enableNextTime() {
         Quickshell.execDetached(["rm", "-f", root.firstRunFilePath])
     }
