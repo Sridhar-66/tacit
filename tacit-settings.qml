@@ -4183,7 +4183,43 @@ ApplicationWindow {
     Component {
         id: inputPage
         ColumnLayout {
+            id: inputCol
             spacing: 0
+            // The pointer runs on a custom curve (slow moves under 1:1, swipes faster), and libinput ignores the speed
+            // setting under a custom curve, so a speed scales the curve itself: -1 halves it, +1 doubles it.
+            function curve(speed) {
+                const points = [];
+                for (let i = 0; i <= 12; i++) {
+                    const v = i * 0.5;
+                    points.push(Number((v * (0.6 + 1.6 * Math.pow(v / 6, 1.2)) * Math.pow(2, speed)).toFixed(3)));
+                }
+                return `custom 0.5 ${points.join(" ")}`;
+            }
+            // a speed said as a word, by how it compares with the usual one (1)
+            function speedWord(ratio) {
+                return ratio < 0.6 ? "Slowest" : ratio < 0.9 ? "Slower" : ratio <= 1.12 ? "Normal" : ratio <= 1.6 ? "Faster" : "Fastest";
+            }
+            // Hyprland gives a speed to every pointer, or to one device by its name, not to touchpads as such: the
+            // touchpads are the devices named so ("...-touchpad", Apple's "...-trackpad"), each given the touchpad's
+            // curve. Both are written together, so the mouse's speed never moves the touchpad's (Discord 2026-10-22: one
+            // touchpad too slow, another too fast, one speed for both).
+            property var touchpads: []
+            Process {
+                running: true
+                command: ["hyprctl", "devices", "-j"]
+                stdout: StdioCollector {
+                    onStreamFinished: {
+                        try { inputCol.touchpads = JSON.parse(text).mice.map(m => m.name).filter(n => /touchpad|trackpad/i.test(n)); } catch (e) {}
+                    }
+                }
+            }
+            function writeSpeeds() {
+                const input = Config.options.hyprland.input;
+                const entries = { "input:sensitivity": input.sensitivity, "input:accel_profile": inputCol.curve(input.sensitivity) };
+                for (const name of inputCol.touchpads)
+                    entries[`device:${name}:accel_profile`] = inputCol.curve(input.touchpad.speed);
+                HyprlandConfig.setMany(entries);
+            }
             Group {
                 title: "Keyboard"
                 ChoiceRow {
@@ -4266,6 +4302,29 @@ ApplicationWindow {
                     }
                 }
                 SettingRow {
+                    visible: inputCol.touchpads.length > 0
+                    clickable: false
+                    label: "Speed"
+                    // written on release: every write reloads Hyprland
+                    stacked: true
+                    control: Ruler {
+                        fill: true
+                        id: touchpadSpeedSlider
+                        implicitWidth: 260
+                        label: inputCol.speedWord(Math.pow(2, touchpadSpeedSlider.value))
+                        from: -1
+                        to: 1
+                        onPressedChanged: if (!pressed) {
+                            Config.options.hyprland.input.touchpad.speed = Math.round(touchpadSpeedSlider.value * 20) / 20;
+                            inputCol.writeSpeeds();
+                        }
+                        Binding on value {
+                            value: Config.options.hyprland.input.touchpad.speed
+                            when: !touchpadSpeedSlider.pressed
+                        }
+                    }
+                }
+                SettingRow {
                     clickable: false
                     label: "Scroll speed"
                     stacked: true
@@ -4273,7 +4332,7 @@ ApplicationWindow {
                         fill: true
                         id: scrollSlider
                         implicitWidth: 260
-                        label: `${Math.round(scrollSlider.value * 100)}%`
+                        label: inputCol.speedWord(scrollSlider.value / 0.7)   // 0.7: Tacit's usual scroll
                         from: 0.1
                         to: 3
                         stepSize: 0.1
@@ -4315,31 +4374,19 @@ ApplicationWindow {
                 }
                 SettingRow {
                     clickable: false
-                    label: "Pointer speed"
+                    label: "Mouse speed"
                     // written on release: every write reloads Hyprland
                     stacked: true
                     control: Ruler {
                         fill: true
                         id: speedSlider
                         implicitWidth: 260
-                        label: `${Math.round(Math.pow(2, speedSlider.value) * 100)}%`   // the curve is scaled by 2^value
+                        label: inputCol.speedWord(Math.pow(2, speedSlider.value))   // the curve is scaled by 2^value
                         from: -1
                         to: 1
-                        // The pointer runs on a custom curve (slow moves under 1:1, swipes faster), and
-                        // libinput ignores the speed setting under a custom curve, so the slider scales
-                        // the curve itself: -1 halves it, +1 doubles it.
-                        function curve(speed) {
-                            const points = [];
-                            for (let i = 0; i <= 12; i++) {
-                                const v = i * 0.5;
-                                points.push(Number((v * (0.6 + 1.6 * Math.pow(v / 6, 1.2)) * Math.pow(2, speed)).toFixed(3)));
-                            }
-                            return `custom 0.5 ${points.join(" ")}`;
-                        }
                         onPressedChanged: if (!pressed) {
-                            const v = Math.round(speedSlider.value * 20) / 20;
-                            Config.options.hyprland.input.sensitivity = v;
-                            HyprlandConfig.setMany({ "input:sensitivity": v, "input:accel_profile": speedSlider.curve(v) });
+                            Config.options.hyprland.input.sensitivity = Math.round(speedSlider.value * 20) / 20;
+                            inputCol.writeSpeeds();
                         }
                         Binding on value {
                             value: Config.options.hyprland.input.sensitivity

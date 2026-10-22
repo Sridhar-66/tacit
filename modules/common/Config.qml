@@ -267,6 +267,7 @@ Singleton {
                     property int followMouse: 1
                     property real sensitivity: 0 // pointer speed, -1..1
                     property JsonObject touchpad: JsonObject {
+                        property real speed: 0 // the touchpad's own speed, -1..1 (Settings writes it per touchpad)
                         property bool naturalScroll: true
                         property bool disableWhileTyping: true
                         property bool clickfingerBehavior: true

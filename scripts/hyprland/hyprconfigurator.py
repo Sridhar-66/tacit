@@ -39,7 +39,19 @@ def to_lua_value(key, value):
     return f'"{value}"'
 
 
+# "device:<name>:<option>": one option of one input device (Hyprland's hl.device), e.g. a touchpad's own speed. The name
+# can hold colons itself ("hid-over-i2c-14e5:650e-touchpad"); the option is after the last one.
+def device_key(key):
+    if not key.startswith("device:"):
+        return None
+    name, _, option = key[len("device:"):].rpartition(":")
+    return name, option
+
+
 def to_lua_line(key, value):
+    dev = device_key(key)
+    if dev:
+        return f'hl.device({{ name = "{dev[0]}", {dev[1]} = {to_lua_value(dev[1], value)} }})\n'
     parts = key.replace(":", ".").split(".")
     val = to_lua_value(key, value)
     inner = f"{{ {parts[-1]} = {val} }}"
@@ -49,6 +61,9 @@ def to_lua_line(key, value):
 
 
 def make_marker(key):
+    dev = device_key(key)
+    if dev:
+        return f'hl.device({{ name = "{dev[0]}", {dev[1]} ='
     parts = key.replace(":", ".").split(".")
 
     fragment = " = { ".join(parts[:-1])
