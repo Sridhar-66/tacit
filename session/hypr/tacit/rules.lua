@@ -91,6 +91,10 @@ hl.window_rule({ match = { class = "^(activity)$" }, center = true })
 hl.window_rule({ match = { class = "^(store)$" }, float = true })
 hl.window_rule({ match = { class = "^(store)$" }, size = { "1528", "928" } })
 hl.window_rule({ match = { class = "^(store)$" }, center = true })
+-- The viewer floats in the middle at its own 1280 x 820 (viewer.qml): Files floats, and a floating window stays above
+-- every tiled one, so a picture opened from Files came up tiled behind it (Discord 2026-10-21). Focused, it is on top.
+hl.window_rule({ match = { class = "^(viewer)$" }, float = true })
+hl.window_rule({ match = { class = "^(viewer)$" }, center = true })
 
 -- Tacit setup's practice run (setup.qml with TACIT_SETUP_WINDOWED=1): a 16:9 window in the middle, the shape it is
 -- drawn for. On the stick it is full screen and this never applies.
