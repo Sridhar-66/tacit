@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.modules.common.functions
 pragma Singleton
 pragma ComponentBehavior: Bound
@@ -49,6 +50,25 @@ Singleton {
     property real autoContentTransparency: 0.9
     property real backgroundTransparency: Config?.options.appearance.transparency.enable ? Config?.options.appearance.transparency.automatic ? autoBackgroundTransparency : Config?.options.appearance.transparency.backgroundTransparency : 0
     property real contentTransparency: Config?.options.appearance.transparency.automatic ? autoContentTransparency : Config?.options.appearance.transparency.contentTransparency
+    // How much of this wallpaper the glass lets through (scripts/colors/seethrough.py, at every wallpaper change): one
+    // scale on every designed see-through amount, 1 on dark wallpapers and less on bright ones, so the grounds under the
+    // text stay as dark as on dusk. Tacit.windowSeeThrough and the frost take it; Hyprland's rules and foot read the file.
+    property real seeThroughScale: 1
+    FileView {
+        path: FileUtils.trimFileProtocol(`${Directories.state}/user/generated/seethrough.json`)
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: {
+            try {
+                const s = JSON.parse(text()).scale;
+                root.seeThroughScale = s >= 0 && s <= 1 ? s : 1;
+            } catch (e) {
+                root.seeThroughScale = 1;
+            }
+        }
+        onLoadFailed: root.seeThroughScale = 1
+    }
     
     // An ink at a given APCA Lc on a ground (surfaceContainerLow unless given): the point on the line from
     // that ground through onBackground on to white (dark grounds) or black (light ones) that first reaches
@@ -244,7 +264,7 @@ Singleton {
         // Was the palette's private formula; hoisted so the panels stop disagreeing.
         // One step above surfaceContainer: over a page of the same dark tone the frost was
         // invisible and the controls floated. Alpha 0.72 stays above the blur threshold (0.64).
-        property color colPanelFrost: ColorUtils.transparentize(m3colors.m3surfaceContainerHigh, 0.24)
+        property color colPanelFrost: ColorUtils.transparentize(m3colors.m3surfaceContainerHigh, 0.24 * root.seeThroughScale)
         property color colSurfaceContainerLow: ColorUtils.solveOverlayColor(m3colors.m3background, m3colors.m3surfaceContainerLow, 1 - root.contentTransparency)
         property color colSurfaceContainer: ColorUtils.solveOverlayColor(m3colors.m3surfaceContainerLow, m3colors.m3surfaceContainer, 1 - root.contentTransparency)
         property color colSurfaceContainerHigh: ColorUtils.solveOverlayColor(m3colors.m3surfaceContainer, m3colors.m3surfaceContainerHigh, 1 - root.contentTransparency)

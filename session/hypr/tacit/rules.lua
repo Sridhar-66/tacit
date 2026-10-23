@@ -62,22 +62,25 @@ hl.layer_rule({ match = { namespace = "quickshell:saveAs" },          blur = tru
 -- opacity takes {active, inactive}. This build's window_rule does not accept
 -- active_opacity/inactive_opacity as separate fields, despite the stub listing
 -- them -- the installed lua wrapper is older than /usr/share/hypr/stubs.
-hl.window_rule({ match = { class = "firefox" },   opacity = "0.85 0.77" })
-hl.window_rule({ match = { class = "thorium.*" }, opacity = "0.85 0.77" })
-hl.window_rule({ match = { class = "[cC]hromium" }, opacity = "0.85 0.77" })
-hl.window_rule({ match = { class = "zen" },       opacity = "0.85 0.77" })
-hl.window_rule({ match = { class = "[hH]elium" }, opacity = "0.85 0.77" })
-hl.window_rule({ match = { class = "browser" },   opacity = "0.85 0.77" })  -- ~/dev/browser
+-- Each pair is the design on dusk; tacit_glass (hyprland.lua) scales its see-through for a bright wallpaper.
+local glass = tacit_glass or function(o) return o end
+local function pair(active, inactive) return string.format("%.3f %.3f", glass(active), glass(inactive)) end
+hl.window_rule({ match = { class = "firefox" },   opacity = pair(0.85, 0.77) })
+hl.window_rule({ match = { class = "thorium.*" }, opacity = pair(0.85, 0.77) })
+hl.window_rule({ match = { class = "[cC]hromium" }, opacity = pair(0.85, 0.77) })
+hl.window_rule({ match = { class = "zen" },       opacity = pair(0.85, 0.77) })
+hl.window_rule({ match = { class = "[hH]elium" }, opacity = pair(0.85, 0.77) })
+hl.window_rule({ match = { class = "browser" },   opacity = pair(0.85, 0.77) })  -- ~/dev/browser
 -- Helium's compact tab strip starts 4px in; the global 22px corner cuts the first tab.
 hl.window_rule({ match = { class = "[hH]elium" }, rounding = 16 })
 
 -- foot already draws its surface at alpha 0.85 (colors-dark.alpha), so the
 -- compositor must NOT fade it further on focus, and only to 0.906 when
 -- unfocused: 0.85 * 0.906 = 0.77, the same effective pair as the browsers.
-hl.window_rule({ match = { class = "foot" }, opacity = "1.0 0.906" })
+hl.window_rule({ match = { class = "foot" }, opacity = pair(1.0, 0.906) })
 -- Nautilus wears the shell's frost: libadwaita is opaque, so the translucency comes from
 -- Hyprland (the blur behind it is the same one the panels get). 0.84 keeps the list readable.
-hl.window_rule({ match = { class = "org.gnome.Nautilus" }, opacity = "0.84 0.78" })
+hl.window_rule({ match = { class = "org.gnome.Nautilus" }, opacity = pair(0.84, 0.78) })
 
 -- Praxis keeps its own opacity: the global inactive 0.82 turned its text grey-on-grey
 hl.window_rule({ match = { class = "^(praxis)$" }, opacity = "1.0 override 1.0 override" })
@@ -94,6 +97,9 @@ hl.window_rule({ match = { class = "^(store)$" }, center = true })
 -- The viewer floats in the middle at its own 1280 x 820 (viewer.qml): Files floats, and a floating window stays above
 -- every tiled one, so a picture opened from Files came up tiled behind it (Discord 2026-10-21). Focused, it is on top.
 hl.window_rule({ match = { class = "^(viewer)$" }, float = true })
+-- not faded when another window has focus: a picture or a video is watched while typing elsewhere, and its window draws
+-- its own glass (viewer.qml: solid under a file shown on its own)
+hl.window_rule({ match = { class = "^(viewer)$" }, opacity = "1.0 override 1.0 override" })
 hl.window_rule({ match = { class = "^(viewer)$" }, center = true })
 
 -- Tacit setup's practice run (setup.qml with TACIT_SETUP_WINDOWED=1): a 16:9 window in the middle, the shape it is

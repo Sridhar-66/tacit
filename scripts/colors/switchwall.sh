@@ -352,6 +352,17 @@ switch() {
 
     python3 "$SCRIPT_DIR/generate_colors_material.py" "${generate_colors_material_args[@]}" \
         > "$output_scss"
+    # how much of this wallpaper the glass lets through (generated/seethrough.json), for the shell's surfaces, the
+    # terminals' alpha (applycolor.sh) and Hyprland's opacity rules at the reload in post_process. A colour picked
+    # without a picture is measured on the wallpaper in use.
+    if [[ -z "$colors_lock_flag" ]]; then
+        local measured="$colorgen_source"
+        if [[ -z "$measured" ]]; then
+            measured=$(jq -r '.background.wallpaperPath // ""' "$SHELL_CONFIG_FILE" 2>/dev/null)
+            is_video "$measured" && measured=$(jq -r '.background.thumbnailPath // ""' "$SHELL_CONFIG_FILE" 2>/dev/null)
+        fi
+        [[ -f "$measured" ]] && python3 "$SCRIPT_DIR/seethrough.py" "$measured" "$colors_json_path" > /dev/null
+    fi
     deactivate
 
     if [[ -z "$colors_lock_flag" ]]; then

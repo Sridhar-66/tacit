@@ -57,7 +57,10 @@ ApplicationWindow {
 
     Rectangle {
         anchors.fill: parent
-        color: ColorUtils.transparentize(root.base, Tacit.windowSeeThrough)
+        // a file shown on its own stands on the solid ground: through the glass around a letterboxed video the desktop
+        // behind looked like a border cut from the video (Discord 2026-10-23, Yugank: a screen recording of the same
+        // wallpaper). The roll of files keeps the glass; the ground firms up as the file settles.
+        color: ColorUtils.transparentize(root.base, Tacit.windowSeeThrough * (1 - viewer.settle))
         Viewer {
             id: viewer
             anchors.fill: parent

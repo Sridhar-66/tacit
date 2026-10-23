@@ -28,6 +28,21 @@ end
 require("hyprland.lib")
 safe_require("hyprland.services")
 
+-- How much of this wallpaper the glass lets through (scripts/colors/seethrough.py, run at every wallpaper change): one
+-- scale on every designed see-through amount, 1 on dark wallpapers and less on bright ones, so the grounds stay as dark
+-- as on dusk. tacit_glass(o) is a designed opacity with its see-through scaled (the opacity rules, windows not in use).
+TACIT_GLASS = 1
+do
+    local state = os.getenv("XDG_STATE_HOME") or (HOME .. "/.local/state")
+    local f = io.open(state .. "/quickshell/user/generated/seethrough.json", "r")
+    if f then
+        local s = tonumber(string.match(f:read("a") or "", '"scale"%s*:%s*([%d.]+)'))
+        f:close()
+        if s and s >= 0 and s <= 1 then TACIT_GLASS = s end
+    end
+end
+function tacit_glass(opacity) return 1 - (1 - opacity) * TACIT_GLASS end
+
 -- Environment variables --
 safe_require("hyprland.env")
 layer("env")
@@ -65,3 +80,7 @@ if theirs("monitors") then safe_require("monitors") end
 
 -- Shell overrides (the person's, written by the shell) --
 if theirs("hyprland/shellOverrides/main") then safe_require("hyprland.shellOverrides.main") end
+
+-- windows not in use as the person set them (Settings, shellOverrides), with this wallpaper's scale on their see-through
+local inactive = hl.get_config("decoration:inactive_opacity")
+if type(inactive) == "number" then hl.config({ decoration = { inactive_opacity = tacit_glass(inactive) } }) end
