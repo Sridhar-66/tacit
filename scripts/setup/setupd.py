@@ -213,6 +213,27 @@ def plan(d):
     keep = min(d["used"] + max(25 * GB, (d["winSize"] - d["used"]) // 2), d["winSize"])
     return {"windowsKeeps": keep, "tacitGets": d["winSize"] - keep, "room": d["winSize"] - keep >= MIN_TACIT}
 
+# The plan each disk was shown with. Install measures the disk again, and a second read could disagree with the one the
+# person decided on: it refused "no room next to it" right after showing room (Discord 2026-10-23, Tamrawii)
+shown = {}
+def show(d):
+    shown[d.get("name")] = plan(d)
+    return shown[d.get("name")]
+
+def no_room(d, pl):
+    """Why "next to" cannot go on this disk, in the words Setup shows after "What stopped it:"."""
+    if d.get("case") == "bitlocker":
+        return "BitLocker is on for this disk"
+    if d.get("case") == "asleep":
+        return "Windows is hibernated rather than shut down (turn off Fast Startup in Windows, then shut it down)"
+    if not d.get("gpt"):
+        return "this disk uses the older MBR layout"
+    if not d.get("esp"):
+        return "this disk has no EFI partition"
+    if d.get("case") == "windows" and d.get("used") is None:
+        return "Setup could not read how much of Windows' partition is in use"
+    return f"Tacit needs {MIN_TACIT // GB} GB and only {(pl or {}).get('tacitGets', 0) // GB} GB can be made free"
+
 # ------------------------------------------------------------------ power
 def power():
     base = "/sys/class/power_supply"
@@ -301,16 +322,16 @@ def act(req):
         d = disks()
         # the disk list only where there is a choice to make
         many = all_disks()
-        listed = [dict(x, plan=plan(x)) for x in many] if len(many) > 1 else []
+        listed = [dict(x, plan=show(x)) for x in many] if len(many) > 1 else []
         emit({"ev": "hello", "practice": not REAL, "disks": listed, "languages": [{"code": c, "name": n, "layout": k, "rtl": c in RTL} for c, n, k in LANGUAGES],
-              "layouts": layouts(), "wifi": wifi(), "wired": wired(), "disk": d, "plan": plan(d), "power": power(), "scenario": SCENARIO})
+              "layouts": layouts(), "wifi": wifi(), "wired": wired(), "disk": d, "plan": show(d), "power": power(), "scenario": SCENARIO})
     elif op == "wifi":
         emit({"ev": "wifi", "wifi": wifi(), "wired": wired()})
     elif op == "disk":
         if not install["running"]:
             chosen["name"] = req.get("name")
         d = disks()
-        emit({"ev": "disk", "disk": d, "plan": plan(d)})
+        emit({"ev": "disk", "disk": d, "plan": show(d)})
     elif op == "power":
         emit({"ev": "power", "power": power()})
     elif op == "join":
@@ -331,10 +352,17 @@ def act(req):
             if REAL:
                 d = disks()
                 pl = plan(d)
-                # "next to" is never turned into an erase: without room it stops before anything changes
+                # "next to" is never turned into an erase: without room it stops before anything changes. Room shown
+                # earlier goes ahead on the shown plan: tacit-install measures again before it shrinks anything and stops
+                # with the disk untouched, in its own words, where there is none
                 if req.get("place") == "next" and not (pl and pl["room"]):
-                    emit({"ev": "install", "state": "failed", "done": 0, "untouched": True, "reason": "no room next to it"})
-                    return
+                    seen = shown.get(d.get("name"))
+                    with open("/tmp/tacit-setup-plan.log", "a") as log:
+                        print(json.dumps({"disk": d, "now": pl, "shown": seen}), file=log)
+                    if not (seen and seen["room"]):
+                        emit({"ev": "install", "state": "failed", "done": 0, "untouched": True, "reason": no_room(d, pl)})
+                        return
+                    pl = seen
                 place = "next" if req.get("place") == "next" else "instead"
                 keep = pl["windowsKeeps"] if place == "next" else None
                 threading.Thread(target=real_install, args=(d.get("name"), place, keep), daemon=True).start()
