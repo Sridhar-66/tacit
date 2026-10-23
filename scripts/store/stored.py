@@ -150,6 +150,27 @@ def bundles():
     return {os.path.basename(os.path.dirname(m)) for m in glob.glob(os.path.join(BUNDLES, "*/manifest.json"))}
 
 
+# The apps got here through pacman (the few that need the system), one name a line: a bundle is known by its folder,
+# but a pacman package does not say where it came from. Your apps lists both, the editorial's or not (Discord
+# 2026-10-22: an app found by search and got here was missing from Your apps while its page said On this computer).
+GOT = os.path.join(os.path.expanduser("~"), ".local/state/tacit/store-got")
+
+
+def got():
+    try:
+        return set(open(GOT).read().split())
+    except OSError:
+        return set()
+
+
+def remember(pkg, keep):
+    names = (got() | {pkg}) if keep else (got() - {pkg})
+    os.makedirs(os.path.dirname(GOT), exist_ok=True)
+    tmp = GOT + ".tmp"
+    open(tmp, "w").write("".join(n + "\n" for n in sorted(names)))
+    os.replace(tmp, GOT)
+
+
 def bundle_plan(pkg):
     """the sandbox's plan in the window's words, or None when the app cannot be a bundle"""
     try:
@@ -168,7 +189,11 @@ def bundle_plan(pkg):
 
 def bundle_install(pkg):
     """get `pkg` as a bundle, saying its progress; its outcome, or "system" when it has to go through pacman"""
-    proc = subprocess.Popen(BUNDLE + ["install", pkg], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace")
+    # what it says on the way out (a failure's reason, a traceback) is kept rather than dropped: a failure said only "Couldn't
+    # install it" (Discord 2026-10-22, Hadi: every app)
+    log = os.path.join(os.path.expanduser("~"), ".cache/tacit-store/bundle.log")
+    os.makedirs(os.path.dirname(log), exist_ok=True)
+    proc = subprocess.Popen(BUNDLE + ["install", pkg], stdout=subprocess.PIPE, stderr=open(log, "w"), text=True, errors="replace")
     result = "failed"
     for line in proc.stdout:
         try:
@@ -404,7 +429,8 @@ def info(pkg, cat, ed, avail, inst, f=None, icon=True):
 def home():
     ed, cat, avail, inst = editorial(), load_index(), available(), installed()
     pkgs = sorted({p for j in ed["jobs"] for p in j["pkgs"]} | set(ed["picks"]) | {ed["feature"]["pkg"]}
-                  | {sp["pkg"] for sp in ed.get("issue", []) if sp.get("pkg")} | {pk for sp in ed.get("issue", []) for _, pk in sp.get("say", []) if pk})
+                  | {sp["pkg"] for sp in ed.get("issue", []) if sp.get("pkg")} | {pk for sp in ed.get("issue", []) for _, pk in sp.get("say", []) if pk}
+                  | bundles() | (got() & inst))
     f = facts([p for p in pkgs if p in avail])
     apps = {p: info(p, cat, ed, avail, inst, f.get(p)) for p in pkgs}
     def first_shot(p):
@@ -666,6 +692,9 @@ def install(pkg, everything=False):
         return out({"result": "ok"})
     if not everything:
         r = bundle_install(pkg)
+        # keys older than the packages' signatures: the updates bring the new ones, and the app comes in the same step
+        if r == "keys":
+            return out({"result": "update", "plan": dict({"can": False, "why": "update", "count": 1}, **pending(pkg))})
         if r != "system" and r != "unavailable":
             return out({"result": r})
     if everything:
@@ -700,6 +729,7 @@ def install(pkg, everything=False):
                 out({"progress": 0.7 + 0.28 * done_inst / max(1, n), "phase": f"Installing {what}{done_inst} of {n}"})
     code = proc.wait()
     if code == 0:
+        remember(pkg, True)
         return out({"result": "ok"})
     out({"result": why(code, lines), "detail": lines[-1] if lines else ""})
 
@@ -718,6 +748,8 @@ def remove(pkg):
     if required and required.group(1).strip() != "None":
         return out({"result": "needed", "by": required.group(1).split()[:4]})
     proc = subprocess.run(PKEXEC + ["-Rs", "--noconfirm", have], capture_output=True, text=True, errors="replace")
+    if proc.returncode == 0:
+        remember(pkg, False)
     out({"result": "ok"} if proc.returncode == 0 else {"result": why(proc.returncode, (proc.stdout + proc.stderr).splitlines())})
 
 

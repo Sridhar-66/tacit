@@ -3,6 +3,9 @@
   "apps": {
     "gnome-mines": {"network": false, "files": "none", "devices": ["gpu", "audio"], "x11": false},
     "gnome-sudoku": {"network": false, "files": "none", "devices": ["gpu"], "x11": false},
-    "obs-studio": {"devices": ["gpu", "audio", "microphone", "camera"]}
+    "obs-studio": {"devices": ["gpu", "audio", "microphone", "camera"]},
+    "code": {"files": "home"},
+    "libreoffice-fresh": {"files": "home"},
+    "libreoffice-still": {"files": "home"}
   }
 }

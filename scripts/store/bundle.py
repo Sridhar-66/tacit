@@ -208,7 +208,8 @@ def fetch(p):
     if not p["sha256"] or sha(dst + ".part") != p["sha256"]:
         os.unlink(dst + ".part"); raise Refused("failed", f"{p['filename']} does not match its checksum")
     if subprocess.run(["gpgv", "--keyring", KEYRING, dst + ".sig", dst + ".part"], capture_output=True).returncode != 0:
-        os.unlink(dst + ".part"); raise Refused("failed", f"{p['filename']} is not signed by a known packager")
+        # on a computer whose updates stopped, its keys predate the packagers who signed today's packages: every app failed
+        os.unlink(dst + ".part"); raise Refused("keys", f"{p['filename']} is not signed by a known packager")
     os.replace(dst + ".part", dst)
     return dst
 
@@ -334,6 +335,9 @@ def run(app, cmd):
     elif perm["files"] == "user-folders":
         for d in user_dirs():
             a += ["--bind", d, d]
+    # and the person's USB drives and disks: a file opened from one did not exist inside the sandbox
+    if perm["files"] in ("home", "user-folders"):
+        a += ["--bind-try", f"/run/media/{os.environ.get('USER', '')}", f"/run/media/{os.environ.get('USER', '')}"]
     wl = os.environ.get("WAYLAND_DISPLAY", "wayland-1")
     a += ["--ro-bind", f"{rt}/{wl}", f"{rt}/{wl}"]
     if "audio" in perm["devices"] or "microphone" in perm["devices"]:
@@ -438,7 +442,9 @@ def install(target, quiet=False):
     prev = json.load(open(old)) if os.path.exists(old) else None
     want = {n: p["version"] for n, p in bundle.items()}
     if prev and prev.get("versions") == want:
-        prev["host_stamp"] = host_stamp(); json.dump(prev, open(old, "w"), indent=1)
+        # the catalogue's permissions as they are now: kept from the first install, a change to them reached nobody
+        prev["host_stamp"] = host_stamp(); prev["permissions"] = perms_for(target, [])
+        json.dump(prev, open(old, "w"), indent=1)
         refresh_caches(os.path.join(base, "root"))
         step(step="done", app=target, changed=False); return prev
     size = sum(p["isize"] for p in bundle.values())
