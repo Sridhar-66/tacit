@@ -3878,6 +3878,37 @@ ApplicationWindow {
                 live: charging
             }
 
+            // the power mode for the charger and for the battery, as Windows has it (services/PowerMode.qml); the one in
+            // use now says so. It asked power-profiles-daemon before, which Tacit does not install: it did nothing.
+            Group {
+                title: root.hasBattery ? "Power and battery" : "Power"
+                visible: root.hasBattery || PowerMode.available
+                ChoiceRow {
+                    visible: PowerMode.available
+                    glyph: "power"
+                    label: root.hasBattery ? "On the charger" : "Power mode"
+                    description: (root.hasBattery && PowerMode.charging ? "In use now. " : "") + PowerMode.say(PowerMode.onCharger)
+                    options: PowerMode.modes
+                    current: PowerMode.onCharger
+                    onPicked: value => PowerMode.set("charger", value)
+                }
+                ChoiceRow {
+                    visible: PowerMode.available && root.hasBattery
+                    glyph: "battery_full"
+                    label: "On battery"
+                    description: (!PowerMode.charging ? "In use now. " : "") + PowerMode.say(PowerMode.onBattery)
+                    options: PowerMode.modes
+                    current: PowerMode.onBattery
+                    onPicked: value => PowerMode.set("battery", value)
+                }
+                SwitchRow {
+                    visible: root.hasBattery
+                    glyph: "bedtime"
+                    label: "Sleep before the battery runs out"
+                    checked: Config.options.battery.automaticSuspend
+                    onToggled: value => Config.options.battery.automaticSuspend = value
+                }
+            }
             Group {
                 title: "Screen"
                 SettingRow {
@@ -4024,24 +4055,6 @@ ApplicationWindow {
                 }
             }
 
-            Group {
-                title: "Battery"
-                visible: root.hasBattery
-                ChoiceRow {
-                    glyph: "speed"
-                    label: "Power mode"
-                    options: [{ value: PowerProfile.PowerSaver, label: "Power saver" }, { value: PowerProfile.Balanced, label: "Balanced" }]
-                        .concat(PowerProfiles.hasPerformanceProfile ? [{ value: PowerProfile.Performance, label: "Performance" }] : [])
-                    current: PowerProfiles.profile
-                    onPicked: value => PowerProfiles.profile = value
-                }
-                SwitchRow {
-                    glyph: "bedtime"
-                    label: "Sleep before the battery runs out"
-                    checked: Config.options.battery.automaticSuspend
-                    onToggled: value => Config.options.battery.automaticSuspend = value
-                }
-            }
             Advanced {
                 StepperRow {
                     visible: root.hasBattery

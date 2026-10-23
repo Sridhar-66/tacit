@@ -1,42 +1,20 @@
 import QtQuick
 import Quickshell
-import Quickshell.Services.UPower
 import qs
 import qs.services
 import qs.modules.common
 import qs.modules.common.functions
 import qs.modules.common.widgets
 
+// The power mode in use now (services/PowerMode.qml): a press steps the one for the charger or the battery, whichever
+// is in use, and Settings > Power and battery keeps both. It asked power-profiles-daemon before, which Tacit does not
+// install, so it changed nothing.
 QuickToggleModel {
-    name: Translation.tr("Power Profile")
-    toggled: PowerProfiles.profile !== PowerProfile.Balanced
-    // Balanced is the default branch, not a case of its own: with no power-profiles-daemon the
-    // profile matches nothing and both of these used to fall through to undefined - no glyph and
-    // no state text. Same shape as PaletteSystemActions.powerProfileName.
-    icon: switch(PowerProfiles.profile) {
-        case PowerProfile.PowerSaver: return "energy_savings_leaf"
-        case PowerProfile.Performance: return "local_fire_department"
-        default: return "airwave"
-    }
-    statusText: switch(PowerProfiles.profile) {
-        case PowerProfile.PowerSaver: return "Power Saver"
-        case PowerProfile.Performance: return "Performance"
-        default: return "Balanced"
-    }
-    
-    mainAction: () => {
-        if (PowerProfiles.hasPerformanceProfile) {
-            switch(PowerProfiles.profile) {
-                case PowerProfile.PowerSaver: PowerProfiles.profile = PowerProfile.Balanced
-                break;
-                case PowerProfile.Balanced: PowerProfiles.profile = PowerProfile.Performance
-                break;
-                case PowerProfile.Performance: PowerProfiles.profile = PowerProfile.PowerSaver
-                break;
-            }
-        } else {
-            PowerProfiles.profile = PowerProfiles.profile == PowerProfile.Balanced ? PowerProfile.PowerSaver : PowerProfile.Balanced
-        }
-    }
-    tooltipText: Translation.tr("Click to cycle through power profiles")
+    name: Translation.tr("Power mode")
+    available: PowerMode.available
+    toggled: PowerMode.current !== "balanced"
+    icon: PowerMode.glyphOf(PowerMode.current)
+    statusText: PowerMode.labelOf(PowerMode.current)
+    mainAction: () => PowerMode.cycleCurrent()
+    tooltipText: PowerMode.charging ? Translation.tr("The power mode on the charger") : Translation.tr("The power mode on battery")
 }
