@@ -54,7 +54,10 @@ Singleton {
     // scale on every designed see-through amount, 1 on dark wallpapers and less on bright ones, so the grounds under the
     // text stay as dark as on dusk. Tacit.windowSeeThrough and the frost take it; Hyprland's rules and foot read the file.
     property real seeThroughScale: 1
+    // after scripts/colors/measure-glass.sh made the file: a watch on a file that was not there sees nothing
+    function seeThroughMeasured() { seeThroughFile.reload() }
     FileView {
+        id: seeThroughFile
         path: FileUtils.trimFileProtocol(`${Directories.state}/user/generated/seethrough.json`)
         watchChanges: true
         printErrors: false

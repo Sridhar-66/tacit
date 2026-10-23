@@ -41,6 +41,15 @@ Singleton {
             FileUtils.trimFileProtocol(`${Directories.state}/user/horizons-given`)]
     }
 
+    // The glass scale for the wallpaper in use where it was never measured (scripts/colors/measure-glass.sh): it is
+    // written when a wallpaper is picked, so accounts from before 1.1.3 kept the unscaled glass on light wallpapers.
+    // Every start; the script does nothing once the scale is there.
+    Process {
+        running: true
+        command: ["bash", Quickshell.shellPath("scripts/colors/measure-glass.sh")]
+        onExited: Appearance.seeThroughMeasured()
+    }
+
     function enableNextTime() {
         Quickshell.execDetached(["rm", "-f", root.firstRunFilePath])
     }
