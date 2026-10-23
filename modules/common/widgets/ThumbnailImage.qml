@@ -60,6 +60,13 @@ StyledImage {
     }
     Component.onDestruction: root.releaseThumbnailSlot()
 
+    property int tries: 0
+    Timer {
+        id: retryTimer
+        interval: 1500
+        onTriggered: root.requestGeneration()
+    }
+
     Process {
         id: thumbnailGeneration
         // argv, not a shell string: a file name is attacker-controlled input here (this runs
@@ -68,17 +75,29 @@ StyledImage {
         // caller's contract: 0 = the thumbnail was already there, 1 = it was just made.
         // -nt is the spec's Thumb::MTime in cheaper form: a cached thumbnail older than the
         // picture is remade, so an edited or replaced file stops showing its old self.
+        // 2 = it could not be made, 3 = the file was still being written (changed in the last 2 s): both are tried
+        // again shortly. A screenshot appears in its folder while it is written, and its failed thumbnail stayed
+        // missing until another file came (Discord 2026-10-23). A video's comes from a frame a second in.
         command: {
             const maxSize = Images.thumbnailSizes[root.thumbnailSizeName];
             const thumb = FileUtils.trimFileProtocol(root.thumbnailPath);
             const src = FileUtils.trimFileProtocol(root.sourcePath);
             return ["bash", "-c",
-                'set -- "$1" "$2" "$3"; [ -f "$2" ] && [ ! "$1" -nt "$2" ] && exit 0; mkdir -p "$(dirname -- "$2")" || exit 0; magick "$1" -resize "$3" "$2" && exit 1; exit 0',
-                "thumbgen", src, thumb, `${maxSize}x${maxSize}`
+                'set -- "$1" "$2" "$3" "$4"; [ -f "$2" ] && [ ! "$1" -nt "$2" ] && exit 0; mkdir -p "$(dirname -- "$2")" || exit 0; '
+                + '[ $(( $(date +%s) - $(stat -c %Y -- "$1" 2>/dev/null || echo 0) )) -lt 2 ] && exit 3; '
+                + 'case "${1,,}" in *.mp4|*.webm|*.mkv|*.mov|*.avi|*.m4v) '
+                + 'for t in 1 0; do ffmpeg -nostdin -v error -y -ss $t -i "$1" -frames:v 1 -vf "scale=$4:$4:force_original_aspect_ratio=decrease" "$2" && [ -s "$2" ] && exit 1; done; rm -f -- "$2"; exit 2 ;; esac; '
+                + 'magick "$1" -resize "$3" "$2" && exit 1; rm -f -- "$2"; exit 2',
+                "thumbgen", src, thumb, `${maxSize}x${maxSize}`, `${maxSize}`
             ]
         }
         onExited: (exitCode, exitStatus) => {
             root.releaseThumbnailSlot();
+            if ((exitCode === 2 || exitCode === 3) && root.tries < 5) {
+                root.tries++;
+                retryTimer.restart();
+                return;
+            }
             // reload when it was just made, or when another tile made it after this one had looked and failed
             if (exitCode === 1 || root.status === Image.Error) {
                 root.source = "";

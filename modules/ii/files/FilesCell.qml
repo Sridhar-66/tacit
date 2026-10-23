@@ -73,10 +73,10 @@ Item {
                 color: Tacit.inkSec
             }
         }
-        Loader {   // only pictures ask for a thumbnail; the widget wants a real path
+        Loader {   // pictures and videos ask for a thumbnail (a video's is a frame); the widget wants a real path
             id: thumb
             anchors.fill: parent
-            active: cell.picture
+            active: cell.picture || cell.thing.kind === "video"
             readonly property int status: item ? item.status : Image.Null
             sourceComponent: ThumbnailImage {
                 sourcePath: cell.filePath

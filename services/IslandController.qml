@@ -878,7 +878,9 @@ Singleton {
         const table = {
             "firefox": ["zen", "firefox", "librewolf", "floorp"],
             "chromium": ["chromium", "google-chrome", "brave-browser", "thorium-browser"],
-            "chrome": ["google-chrome", "chromium"]
+            "chrome": ["google-chrome", "chromium"],
+            "thyris": ["browser-cef", "browser"],   // Thyris's window is the engine's (Discord 2026-10-23)
+            "opsis": ["browser-cef", "browser"]
         };
         const candidates = table[key] ?? [key];
         const win = (HyprlandData.windowList ?? []).find(w => candidates.includes((w.class ?? "").toLowerCase()));

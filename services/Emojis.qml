@@ -56,6 +56,9 @@ Singleton {
             // an install has no ~/.config/hypr: the session's own copy under TACIT_HYPR is the emoji list there
             if (root.emojiScriptPath !== root.shippedScriptPath) {
                 root.emojiScriptPath = root.shippedScriptPath
+                // read once this failure has returned: a path changed inside it is dropped with the failed read, and
+                // the list stayed empty on every install ("No emoji for", Discord 2026-10-23, Yugank and Hadi)
+                Qt.callLater(() => emojiFileView.reload())
                 return
             }
             console.warn("[Emojis] no emoji list at " + root.emojiScriptPath)

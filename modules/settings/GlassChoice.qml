@@ -42,7 +42,8 @@ Column {
             Image {
                 id: wall
                 anchors.fill: parent
-                source: gl.wallpaper.length > 0 ? `file://${gl.wallpaper}` : ""
+                // escaped, as Miniature's: a '#', '?' or '%' in the picture's name left the tile empty
+                source: gl.wallpaper.length > 0 ? "file://" + gl.wallpaper.split("/").map(encodeURIComponent).join("/") : ""
                 sourceSize.width: 256
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true

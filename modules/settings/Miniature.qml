@@ -26,7 +26,9 @@ Item {
         Image {
             id: wall
             anchors.fill: parent
-            source: mini.wallpaper.length > 0 ? `file://${mini.wallpaper}` : ""
+            // each part of the path escaped: a '#', '?' or '%' in a picture's name cut the address short and the
+            // preview stayed empty
+            source: mini.wallpaper.length > 0 ? "file://" + mini.wallpaper.split("/").map(encodeURIComponent).join("/") : ""
             sourceSize.width: 960
             fillMode: Image.PreserveAspectCrop
             asynchronous: true

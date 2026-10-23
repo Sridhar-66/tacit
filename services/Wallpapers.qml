@@ -139,6 +139,11 @@ Singleton {
     function apply(path, darkMode = Appearance.m3colors.darkmode) {
         if (!path || path.length === 0) return;
         root.remember(path);
+        // into the shell's own settings first, as the first run does: switchwall.sh writes the same path later, and a
+        // write of its lost under the shell's left the old path on disk while confirmedPath kept the new picture on
+        // screen, so it came back after a restart and Settings showed no preview (Discord 2026-10-22, Axy)
+        Config.options.background.wallpaperPath = path;
+        Config.writeNow();
         root.confirmedPath = path;
         Quickshell.execDetached([Directories.wallpaperSwitchScriptPath, "--mode", darkMode ? "dark" : "light", "--image", path]);
         root.changed()
