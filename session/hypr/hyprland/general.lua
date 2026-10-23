@@ -328,3 +328,9 @@ hl.config({
 if is_file_exists("/usr/lib/tacit/hyprland/tacit-ground.so") then
     hl.plugin.load("/usr/lib/tacit/hyprland/tacit-ground.so")
 end
+
+-- A window shared on its own (a call, a stream) keeps drawing while it is out of sight (tacit-portal's tacit-share.so):
+-- Hyprland suspended it and copied no frames once it was on another workspace, so the share froze on its last frame
+if is_file_exists("/usr/lib/tacit/hyprland/tacit-share.so") then
+    hl.plugin.load("/usr/lib/tacit/hyprland/tacit-share.so")
+end
