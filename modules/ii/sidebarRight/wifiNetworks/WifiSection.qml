@@ -377,7 +377,7 @@ Item {
                 if (row.acting.length === 0)
                     return;
                 row.acting = "";
-                Network.wifiActionError = Translation.tr("No answer from NetworkManager");
+                Network.wifiActionError = Translation.tr("Wi-Fi did not answer");
             }
         }
         onAskingChanged: if (!row.asking) { passwordField.text = ""; identityField.text = ""; if (row.network) row.network.lastError = ""; }   // nothing lingers

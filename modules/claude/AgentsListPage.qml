@@ -142,7 +142,7 @@ PanelPage {
             readonly property string says: lp.p.loaded ? (!lp.p.readable ? `${lp.p.toolName(lp.p.info?.tool ?? "")}'s agents can't be read yet. Its results still show in the conversation.`
                 : (!lp.p.agents.length && !lp.p.runs.length && !lp.p.shells.length) ? "No agents in this session yet." : "")
                 : lp.p.listError.length ? lp.p.listError
-                : !(lp.p.host?.connected ?? false) ? "Lost the connection to agent-host." : "Reading…"
+                : !(lp.p.host?.connected ?? false) ? "Lost the connection to the background service. Praxis keeps trying to reconnect." : "Reading…"
             visible: says.length > 0
             width: parent.width
             topPadding: 16

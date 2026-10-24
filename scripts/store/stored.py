@@ -602,12 +602,10 @@ def gone(urls):
 
 def pending(pkg=""):
     """what getting `pkg` together with the waiting updates would bring: the updates' count and size and the app's own, from
-    the fresh copy of the package list that checkupdates keeps in /tmp (no password; this computer's own list is untouched)"""
-    run(["checkupdates"], timeout=180)
-    db = os.environ.get("CHECKUPDATES_DB") or os.path.join(os.environ.get("TMPDIR") or "/tmp", f"checkup-db-{os.getuid()}")
+    this computer's package list, which Tacit's updater keeps fresh as root (no password; nothing is refreshed here)"""
     def sizes(args):
         out_ = []
-        for line in run(["pacman", *args, "--dbpath", db, "--print-format", "%n %s %l"], timeout=120).splitlines():
+        for line in run(["pacman", *args, "--print-format", "%n %s %l"], timeout=120).splitlines():
             parts = line.split()
             if len(parts) == 3 and parts[1].isdigit():
                 out_.append((parts[0], int(parts[1]), parts[2].startswith("file://")))   # file:// = already downloaded

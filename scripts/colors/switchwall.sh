@@ -340,7 +340,7 @@ switch() {
     fi
 
     if ! activate_shell_venv; then
-        notify-send "Wallpaper" "The colour scheme was not regenerated: no python environment." -a "Shell" &
+        notify-send "Wallpaper" "The colours did not follow the new wallpaper." -a "Tacit" &
         return 1
     fi
 

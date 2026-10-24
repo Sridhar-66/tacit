@@ -19,7 +19,7 @@
 # keyboard, the Wi-Fi network joined in Setup; NVIDIA's driver only where there is an NVIDIA card. UEFI computers only,
 # for now.
 # It refuses anything but Tacit's live system (/run/archiso), the stick it runs from, and a disk with anything mounted.
-import glob, json, os, re, shutil, subprocess, sys, time
+import glob, json, os, re, shutil, subprocess, sys, time, traceback
 
 TARGET = "/mnt/tacit"
 state = {"touched": False, "t0": time.time()}
@@ -525,7 +525,10 @@ def main():
         finish()
         say(dict({"state": "done", "done": 1.0}, **({"other": state["other"]} if state.get("other") else {})))
     except Exception as e:
-        reason = str(e) if isinstance(e, Refused) else f"{type(e).__name__}: {e}"
+        # an unexpected error is plumbing: Setup shows only "didn't finish", and the traceback is in the log (stderr)
+        reason = str(e) if isinstance(e, Refused) else ""
+        if not isinstance(e, Refused):
+            traceback.print_exc()
         subprocess.run(["umount", "-R", TARGET], capture_output=True)
         say({"state": "failed", "reason": reason, "untouched": not state["touched"]})
 

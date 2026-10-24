@@ -66,7 +66,16 @@ Singleton {
     }
     // the next start installs them; no password (50-tacit-updates.rules)
     function restartNow() {
-        Quickshell.execDetached(["bash", "-c", "systemctl start tacit-update@now.service && systemctl reboot"]);
+        restartProc.running = true;
+    }
+    // the download for the install is made first; when it fails nothing restarts, and the notch says so
+    Process {
+        id: restartProc
+        command: ["bash", "-c", "systemctl start tacit-update@now.service && systemctl reboot"]
+        onExited: (code, status) => {
+            if (code !== 0)
+                IslandController.request("copied", { "icon": "error", "text": "Couldn't download the update" }, 65);
+        }
     }
     // what changed: Settings' About, where the notes are
     function openNotes() {

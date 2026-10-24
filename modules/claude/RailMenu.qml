@@ -103,7 +103,7 @@ FocusScope {
         const tool = r.tool || s.tool || "claude";
         const agent = menu.agentNames[tool] ?? tool;
         const held = menu.heldByTerminal ? "Open in a terminal" : "";
-        const host = menu.hostUp ? "" : "agent-host is not answering";
+        const host = menu.hostUp ? "" : "The background service is not answering";
         const no = `Not offered for ${agent}`;
         const id = r.id;
         const running = !!menu.live?.[id]?.alive;

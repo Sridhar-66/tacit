@@ -1472,7 +1472,7 @@ ApplicationWindow {
             Group {
                 visible: nt.viewing === "reminders"
                 title: "Reminders"
-                note: "Claude sessions' folders are always watched. Pull requests need the GitHub CLI signed in (gh auth login)."
+                note: "Claude sessions' folders are always watched. Pull request reminders only work when GitHub is signed in on this computer."
                 Repeater {
                     model: Config.options.island.unsavedRepos
                     SettingRow {
@@ -3354,7 +3354,7 @@ ApplicationWindow {
             Summary {
                 visible: accPage.down
                 glyph: "key"
-                title: "Can't reach agent-host"
+                title: "Can't reach the background service"
                 subtitle: accPage.accounts.length > 0 ? "The accounts below are as it last saw them" : ""
                 live: false
                 TextButton {
@@ -3366,10 +3366,10 @@ ApplicationWindow {
                 visible: !accPage.down && accPage.viewing === "" && (accPage.old
                     || (accPage.fromHost && (accountsModel.keyring === "locked" || !accountsModel.anyReady)))
                 glyph: "key"
-                title: accPage.old ? "This agent-host can't manage accounts"
+                title: accPage.old ? "The background service can't manage accounts"
                     : accountsModel.anyReady ? `${accountsModel.readyAgents.length} of ${accPage.shownAgents.length} agents ready`
                     : "No agent is ready yet"
-                subtitle: accPage.old ? "A restart of agent-host.service starts the newer one"
+                subtitle: accPage.old ? "Restart the computer to get the newer one"
                     : accountsModel.keyring === "locked" ? accPage.lockedLine
                     : accountsModel.anyReady ? accPage.needsLine
                     : "Install or sign in to one below. Praxis and the notch's Ask use it."
@@ -4700,11 +4700,20 @@ ApplicationWindow {
                 readonly property bool busy: Updates.phase !== ""
                 readonly property bool ready: !busy && updatesGroup.state.ready === true
                 readonly property int waiting: updatesGroup.state.count ?? 0
+                // Date.now() is not a binding: this ticks the age of the last check while the page shows
+                property real now: Date.now()
+                Timer {
+                    interval: 60000
+                    running: updatesGroup.visible
+                    repeat: true
+                    triggeredOnStart: true
+                    onTriggered: updatesGroup.now = Date.now()
+                }
                 readonly property string checkedText: {
                     const t = Updates.lastChecked || updatesGroup.state.checked || 0;
                     if (!t)
                         return "";
-                    const m = Math.round((Date.now() - t) / 60000);
+                    const m = Math.round((updatesGroup.now - t) / 60000);
                     return m < 1 ? "Checked just now" : m < 60 ? `Checked ${m} min ago`
                         : `Checked at ${Qt.formatTime(new Date(t), "hh:mm")}`;
                 }

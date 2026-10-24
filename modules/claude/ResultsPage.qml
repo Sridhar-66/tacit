@@ -128,7 +128,7 @@ PanelPage {
         spacing: 2
 
         StyledText {
-            readonly property string says: !rp.p.canResults ? "Results need the newer agent-host. They show after agent-host is restarted."
+            readonly property string says: !rp.p.canResults ? "Results need a newer background service. Restart the computer to get it."
                 : rp.p.resultsError.length ? rp.p.resultsError
                 : !rp.r ? "Reading the agents' reports…"
                 : rp.r.counts?.sources === 0 ? "Nothing has reported in this session yet." : ""

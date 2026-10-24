@@ -24,7 +24,8 @@ ready() {
 
 case "${1:-}" in
 now)
-	ready
+	# a download that failed restarts nothing: the install at the start has no network and would fail
+	ready || exit 1
 	ln -sfn /var/cache/pacman/pkg /system-update
 	;;
 tonight)
@@ -46,7 +47,7 @@ night)
 			&& [ "$(loginctl show-session "$s" -p LockedHint --value)" != yes ] && exit 0
 	done
 	systemctl stop tacit-update-night.timer
-	ready
+	ready || exit 1
 	ln -sfn /var/cache/pacman/pkg /system-update
 	systemctl reboot
 	;;

@@ -164,7 +164,7 @@ Item {
             // empty workspace, or the focus still on a layer surface - gives hyprctl no geometry
             // at all, and this used to hand grim "null,null nullxnull" and end there: the notch
             // was already folded, so the failure had nowhere to appear. It says so now.
-            Quickshell.execDetached(["bash", "-c", `sleep 0.55; g=$(hyprctl activewindow -j | jq -r 'if (.at | type) == "array" then "\\(.at[0]),\\(.at[1]) \\(.size[0])x\\(.size[1])" else "" end'); if [ -z "$g" ]; then notify-send 'Ask' 'No window was focused, so there was nothing to look at.' -a "Shell"; exit 1; fi; d="$HOME/.cache/agent-host/region"; mkdir -p "$d"; f="$d/window-$(date '+%Y-%m-%d_%H.%M.%S').png"; grim -g "$g" "$f" || { notify-send 'Ask' 'That window could not be captured.' -a "Shell"; exit 1; }; qs -p '${StringUtils.shellSingleQuoteEscape(Quickshell.shellPath(""))}' ipc call island askWith "$f"`]);
+            Quickshell.execDetached(["bash", "-c", `sleep 0.55; g=$(hyprctl activewindow -j | jq -r 'if (.at | type) == "array" then "\\(.at[0]),\\(.at[1]) \\(.size[0])x\\(.size[1])" else "" end'); if [ -z "$g" ]; then notify-send 'Ask' 'No window was focused, so there was nothing to look at.' -a "Tacit"; exit 1; fi; d="$HOME/.cache/agent-host/region"; mkdir -p "$d"; f="$d/window-$(date '+%Y-%m-%d_%H.%M.%S').png"; grim -g "$g" "$f" || { notify-send 'Ask' 'That window could not be captured.' -a "Tacit"; exit 1; }; qs -p '${StringUtils.shellSingleQuoteEscape(Quickshell.shellPath(""))}' ipc call island askWith "$f"`]);
     }
 
     // a quiet text button in the header's tone (the continuity line, Start, Stop)

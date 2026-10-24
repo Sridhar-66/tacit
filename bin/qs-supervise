@@ -169,10 +169,10 @@ done
 
 # Hyprland's own notifier works without the shell's notification daemon.
 hyprctl notify -1 15000 "rgb(ff5555)" \
-    "Shell crash-looped $MAX_TRIES times - gave up. See ~/.cache/qs-crashloop.txt" \
+    "The desktop stopped and could not restart itself. Restart the computer." \
     >/dev/null 2>&1 || true
-notify-send -u critical "Shell gave up" \
-    "Quickshell crash-looped. See ~/.cache/qs-crashloop.txt" >/dev/null 2>&1 || true
+notify-send -u critical -a Tacit "The desktop stopped" \
+    "It could not restart itself. Restart the computer to get it back." >/dev/null 2>&1 || true
 
 rm -f "$PIDFILE"
 exit 1

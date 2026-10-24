@@ -443,7 +443,7 @@ ApplicationWindow {
     }
     function fork(id) {
         host.request({ op: "fork", id: id }, m => {
-            if (m.ev !== "forked") { rail.notice(`Not forked: ${m.message ?? "agent-host did not answer"}`); return; }
+            if (m.ev !== "forked") { rail.notice(`Not forked: ${m.message ?? "the background service did not answer"}`); return; }
             root.markMine(m.id);
             const src = fm.byId[id] ?? ({});
             if (fm.filed[id]) fm.refile(m.id, fm.filed[id]);

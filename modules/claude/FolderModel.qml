@@ -350,7 +350,7 @@ Item {
             if (!fm.archived.includes(id)) fm.toggleArchive(id);
             return true;
         }
-        if (!fm.host) { fm.deleted(id, "agent-host is not answering"); return true; }
+        if (!fm.host) { fm.deleted(id, "the background service is not answering"); return true; }
         if (!fm.host.connected) return false;
         fm.setGone(id, true);
         const s = Object.assign({}, fm.sent);
@@ -385,7 +385,7 @@ Item {
                 const s = Object.assign({}, fm.sent);
                 for (const id of late) delete s[id];
                 fm.sent = s;
-                for (const id of late) { fm.setGone(id, false); fm.deleted(id, "agent-host did not answer"); }
+                for (const id of late) { fm.setGone(id, false); fm.deleted(id, "the background service did not answer"); }
             }
             const due = Object.keys(fm.deleting).filter(id => now - fm.deleting[id].at >= 60000);
             if (!due.length) return;

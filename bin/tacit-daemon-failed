@@ -22,9 +22,14 @@ mkdir -p "$dir" 2>/dev/null || true
 	echo "-------------------------------------------------------------"
 	journalctl --user -u "$unit" -n 40 --no-pager 2>/dev/null
 } > "$note" 2>/dev/null
+# People get a plain name, not the unit name or the note's path.
+case "$unit" in
+	flowd.service) name="Dictation" ;;
+	*) name="A part of Tacit" ;;
+esac
 # Hyprland's own notifier works without the shell's notification daemon.
 hyprctl notify -1 15000 "rgb(ff5555)" \
-	"$unit gave up - see ~/.cache/tacit-daemon-failed/$unit.txt" >/dev/null 2>&1 || true
-notify-send -u critical -a Tacit "$unit gave up" \
-	"It will not be restarted. See ~/.cache/tacit-daemon-failed/$unit.txt" >/dev/null 2>&1 || true
+	"$name stopped and will not restart. Restart the computer to get it back." >/dev/null 2>&1 || true
+notify-send -u critical -a Tacit "$name stopped" \
+	"It will not restart on its own. Restart the computer to get it back." >/dev/null 2>&1 || true
 exit 0

@@ -57,7 +57,7 @@ Item {
         if (cb)
             host.callbacks[tag] = cb;
         obj.tag = tag;
-        if (!host.connected) { if (cb) cb({ ev: "error", message: "Lost the connection to agent-host.", disconnected: true }); return; }
+        if (!host.connected) { if (cb) cb({ ev: "error", message: "Lost the connection to the background service. Praxis keeps trying to reconnect.", disconnected: true }); return; }
         host.link.write(JSON.stringify(obj) + "\n");
         host.link.flush();
     }
@@ -70,7 +70,7 @@ Item {
         const pending = host.callbacks;
         host.callbacks = ({});
         for (const tag in pending)
-            pending[tag]({ ev: "error", message: "Lost the connection to agent-host.", disconnected: true });
+            pending[tag]({ ev: "error", message: "Lost the connection to the background service. Praxis keeps trying to reconnect.", disconnected: true });
     }
 
     readonly property bool testRun: Quickshell.env("PRAXIS_TEST") === "1"

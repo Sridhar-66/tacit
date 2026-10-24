@@ -338,8 +338,13 @@ def act(req):
         if REAL:
             # NetworkManager joins it (and keeps it, so the installed system has it too); the password stays in argv
             # only for nmcli's own run on this live system
-            cmd = ["nmcli", "dev", "wifi", "connect", req.get("ssid", "")] + (["password", req.get("password", "")] if req.get("secure") else [])
-            ok = subprocess.run(cmd, capture_output=True, timeout=45).returncode == 0
+            # nmcli gives up on its own (--wait) before our timeout; a run that still overruns, or cannot start, is a
+            # join that did not happen, and Setup is always answered
+            cmd = ["nmcli", "--wait", "30", "dev", "wifi", "connect", req.get("ssid", "")] + (["password", req.get("password", "")] if req.get("secure") else [])
+            try:
+                ok = subprocess.run(cmd, capture_output=True, timeout=45).returncode == 0
+            except (subprocess.TimeoutExpired, OSError):
+                ok = False
         else:
             # practice: nothing is joined. A password under 8 characters is "wrong", so that screen can be seen.
             time.sleep(1.2)

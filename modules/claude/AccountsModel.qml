@@ -312,7 +312,7 @@ Item {
     // an error at once.
     function send(obj, cb) {
         if (!acc.available) {
-            if (cb) cb({ ev: "error", message: "agent-host here does not manage accounts.", unavailable: true });
+            if (cb) cb({ ev: "error", message: "The background service here does not manage accounts.", unavailable: true });
             return;
         }
         acc.link.request(obj, r => { acc.absorb(r); if (cb) cb(r); });

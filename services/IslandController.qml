@@ -717,7 +717,7 @@ Singleton {
         && !GlobalStates.screenLocked && !GlobalStates.sessionOpen
 
     function notice(summary, body, urgent) {
-        const args = ["notify-send", summary, body, "-a", "Shell"];
+        const args = ["notify-send", summary, body, "-a", "Tacit"];
         if (urgent)
             args.push("-u", "critical");
         if (!GlobalStates.screenLocked)

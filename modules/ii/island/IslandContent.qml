@@ -988,7 +988,13 @@ Item {
                     color: IslandController.contentColor
                 }
                 StyledText {
-                    text: promptBody.secs < 60 ? `It stopped ${Math.max(1, promptBody.secs)} seconds ago.` : `It stopped ${Math.round(promptBody.secs / 60)} minutes ago.`
+                    text: {
+                        const s = Math.max(1, promptBody.secs);
+                        if (s < 60)
+                            return s === 1 ? "It stopped 1 second ago." : `It stopped ${s} seconds ago.`;
+                        const m = Math.round(s / 60);
+                        return m === 1 ? "It stopped 1 minute ago." : `It stopped ${m} minutes ago.`;
+                    }
                     font.pixelSize: 14
                     color: IslandController.subtextColor
                 }

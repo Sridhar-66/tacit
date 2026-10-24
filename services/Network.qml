@@ -272,16 +272,25 @@ Singleton {
         return fields;
     }
 
-    // What went wrong, in nmcli's own words, as one line: its stderr is several lines and repeats
-    // the activation code, so only the last line is kept and the boilerplate taken off.
+    // What went wrong, in plain words. nmcli's stderr is logged, never shown; only the failures people
+    // actually hit are named, anything else shows the prefix alone.
     function failureText(prefix: string, err: string): string {
-        const lines = (err ?? "").trim().split("\n").map(l => l.trim()).filter(l => l.length > 0);
-        const detail = (lines.length > 0 ? lines[lines.length - 1] : "")
-            .replace(/^Error:\s*/, "")
-            .replace(/^Connection activation failed:\s*/, "")
-            .replace(/^\(\d+\)\s*/, "")
-            .replace(/\.$/, "");
-        return detail.length > 0 ? `${prefix} · ${detail}` : prefix;
+        const raw = (err ?? "").trim();
+        if (raw.length === 0)
+            return prefix;
+        console.warn(`Network: ${prefix}: ${raw}`);
+        const reasons = [
+            [/no network with ssid|out of range/i, Translation.tr("the network is out of range")],
+            [/ip configuration|dhcp/i, Translation.tr("the network did not answer")],
+            [/timed out|timeout/i, Translation.tr("it took too long")],
+            [/not authorized|not authorised|permission|insufficient privileges/i, Translation.tr("this account is not allowed")],
+            [/not running|could not create nmclient|unable to connect|org\.freedesktop\.networkmanager/i, Translation.tr("restart the computer and try again")],
+            [/busy|unavailable|not ready|device is not/i, Translation.tr("the Wi-Fi adapter is busy")]
+        ];
+        for (const [re, text] of reasons)
+            if (re.test(raw))
+                return `${prefix} · ${text}`;
+        return prefix;
     }
 
     // ---- security, as nmcli names it

@@ -96,13 +96,13 @@ Singleton {
             // A focused layer surface can leave hyprctl with no active window, so an empty reading
             // before the wait is not treated as the target - an empty one after it still aborts.
             + `if [ -z "$focused" ] || { [ -n "$target" ] && [ "$focused" != "$target" ]; }; then `
-            + `notify-send '${stoppedTitle}' '${stopped}' -a "Shell"; exit 1; fi; `
-            + `command -v ydotool >/dev/null || { notify-send '${failedTitle}' '${noYdotool}' -a "Shell"; exit 1; }; `
+            + `notify-send '${stoppedTitle}' '${stopped}' -a "Tacit"; exit 1; fi; `
+            + `command -v ydotool >/dev/null || { notify-send '${failedTitle}' '${noYdotool}' -a "Tacit"; exit 1; }; `
     }
 
     function pasteFailureReport(): string {
         return ` || notify-send '${StringUtils.shellSingleQuoteEscape(Translation.tr("Paste failed"))}' `
-            + `'${StringUtils.shellSingleQuoteEscape(Translation.tr("Could not type into the focused window"))}' -a "Shell"`
+            + `'${StringUtils.shellSingleQuoteEscape(Translation.tr("Could not type into the focused window"))}' -a "Tacit"`
     }
 
     function paste(entry) {
@@ -120,7 +120,7 @@ Singleton {
             return entryIsImage(entry);
         }).slice(0, count)
         if (targetEntries.length === 0) {
-            Quickshell.execDetached(["notify-send", Translation.tr("Superpaste"), Translation.tr("No matching clipboard entries"), "-a", "Shell"]);
+            Quickshell.execDetached(["notify-send", Translation.tr("Superpaste"), Translation.tr("No matching clipboard entries"), "-a", "Tacit"]);
             return;
         }
         const pasteCommands = [...targetEntries].reverse().map(entry => `printf '%s' '${StringUtils.shellSingleQuoteEscape(entry)}' | ${root.cliphistBinary} decode | wl-copy && sleep ${root.pasteDelay} && ${root.pressPasteCommand}`)
