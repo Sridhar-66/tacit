@@ -155,6 +155,7 @@ Singleton {
         case "flow":        // Flow listening or writing: it stays until flowd says it is done
             return 120000;
         case "flowNote":    // what Flow could not do: a line to read, not a flash
+        case "note":        // another program's line (island note): read, not flashed
             return 4000;
         case "disk":
         case "pr":
@@ -2298,7 +2299,7 @@ Singleton {
 
         // `island note <icon> "<text>"`: one line in the notch, for other programs
         function note(icon: string, text: string): void {
-            root.request("copied", { "icon": icon, "text": text }, 65);
+            root.request("note", { "icon": icon, "text": text }, 65);
         }
 
         function notAnsweringGone(id: string): void {
