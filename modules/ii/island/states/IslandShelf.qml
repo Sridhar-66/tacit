@@ -93,7 +93,8 @@ Item {
             // The zone holds four tiles: a glance. More than four and the fourth tile is the
             // count, and it opens the shelf as a list in Files, where twenty is nothing.
             readonly property int shown: DropShelf.items.length > 4 ? 3 : DropShelf.items.length
-            model: DropShelf.items.slice(0, shown).concat(DropShelf.items.length > 4 ? [`+${DropShelf.items.length - 3}`] : [])
+            // the newest first: a drop joins the end of the list, and showing its start hid what was just dropped
+            model: DropShelf.items.slice(DropShelf.items.length - shown).reverse().concat(DropShelf.items.length > 4 ? [`+${DropShelf.items.length - 3}`] : [])
             interactive: false
 
             delegate: Item {
