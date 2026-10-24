@@ -493,10 +493,13 @@ ApplicationWindow {
             }
             Quiet {
                 id: otherWay
-                visible: ["wifi", "where", "erase"].includes(root.shownPage)
+                // on the stick's first screen: Tacit as it is, without installing it (Discord 2026-10-24: people did not
+                // know they could, and Setup covered the desktop)
+                readonly property bool tryFirst: root.shownPage === "welcome" && !backend.practice && !root.windowed
+                visible: tryFirst || ["wifi", "where", "erase"].includes(root.shownPage)
                 x: primary.x - width - Look.px(18); y: Look.px(724)
-                text: root.shownPage === "wifi" ? "Not now" : "Back"
-                onClicked: root.shownPage === "wifi" ? setup.go("where") : setup.back()
+                text: tryFirst ? "Try Tacit first" : root.shownPage === "wifi" ? "Not now" : "Back"
+                onClicked: tryFirst ? root.tryTacitFirst() : root.shownPage === "wifi" ? setup.go("where") : setup.back()
             }
             Quiet {
                 visible: root.shownPage === "languages" || root.shownPage === "keyboards" || root.shownPage === "disks"
@@ -646,6 +649,13 @@ ApplicationWindow {
         backend.send({ op: "answers", language: setup.language, layout: setup.layout, network: setup.joined || setup.network,
                        place: setup.place, name: nameField.text.trim(), password: passField.text, picture: setup.picture, reports: setup.reports });
         setup.go(setup.installState === "done" ? "ready" : "almost");
+    }
+    // Setup steps aside on the stick and says once how to come back: the launcher's Install Tacit (the ISO's
+    // tacit-setup.desktop) opens it again
+    function tryTacitFirst() {
+        Quickshell.execDetached(["notify-send", "-a", "Tacit", "Tacit is running from the USB stick",
+                                 "Nothing is installed. To install it, press Super and open Install Tacit."]);
+        Qt.quit();
     }
     function endPractice() { if (root.walk) console.info("WALK end"); Qt.quit(); }
 
