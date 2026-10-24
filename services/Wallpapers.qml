@@ -190,6 +190,22 @@ Singleton {
         return candidates;
     }
 
+    // A wallpaper that cannot be shown, said once: the background is one per screen and every screen's copy fails on
+    // the same picture at the same moment (two screens, two notices). The same picture again later is said again.
+    property string unloadableLast: ""
+    property real unloadableAt: 0
+    function reportUnloadable(path) {
+        const now = Date.now();
+        if (path === root.unloadableLast && now - root.unloadableAt < 10000) return;
+        root.unloadableLast = path;
+        root.unloadableAt = now;
+        Quickshell.execDetached(["notify-send",
+            Translation.tr("Wallpaper could not be loaded"),
+            path,
+            "-a", "Wallpaper switcher", "-c", "im.error"
+        ]);
+    }
+
     function randomFromCurrentFolder(darkMode = Appearance.m3colors.darkmode) {
         const candidates = root.imagesInCurrentFolder();
         if (candidates.length === 0) {

@@ -387,6 +387,24 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
             }
 
+            // config.json has a mistake in it: what is set here looks set but is not kept (Config.fileBroken)
+            Group {
+                visible: Config.fileBroken
+                SettingRow {
+                    clickable: false
+                    glyph: "warning"
+                    label: "Changes here aren't saved"
+                    description: Config.backupUsable
+                        ? "Your settings file has a mistake in it, so Tacit is using its defaults. Restore puts back the last good copy."
+                        : `Your settings file has a mistake in it, so Tacit is using its defaults until it's fixed: ${Config.filePath}`
+                    control: TextButton {
+                        visible: Config.backupUsable
+                        label: "Restore"
+                        onPressed: Config.restoreBackup()
+                    }
+                }
+            }
+
             Loader {
                 id: pageLoader
                 Layout.fillWidth: true

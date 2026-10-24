@@ -50,6 +50,8 @@ ShellRoot {
     }
 
     Component.onCompleted: {
+        // the desktop is the one Tacit program that says config.json cannot be read (Config.reportsProblems)
+        Config.reportsProblems = true
         MaterialThemeLoader.reapplyTheme()
         Hyprsunset.load()
         FirstRunExperience.load()

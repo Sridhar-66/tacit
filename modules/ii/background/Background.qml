@@ -237,11 +237,7 @@ Variants {
             }
             previousWallpaper.source = "";
             bgRoot.previousWallpaperSource = "";
-            Quickshell.execDetached(["notify-send",
-                Translation.tr("Wallpaper could not be loaded"),
-                CF.FileUtils.trimFileProtocol(String(failedSource)),
-                "-a", "Wallpaper switcher", "-c", "im.error"
-            ]);
+            Wallpapers.reportUnloadable(CF.FileUtils.trimFileProtocol(String(failedSource)));
         }
 
         Timer {

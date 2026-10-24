@@ -14,6 +14,18 @@ Singleton {
     property bool blockWrites: false // writes go to disk synchronously, not blocked
     // Nothing writes config.json until it has been read back and parsed once.
     property bool loadedCleanly: false
+    // config.json is there but cannot be used (why, in plain words): nothing set is saved until it is fixed.
+    // Settings says so on every page.
+    property string unusableReason: ""
+    readonly property bool fileBroken: ready && !loadedCleanly && unusableReason !== ""
+    readonly property string backupPath: `${filePath}.bak`
+    property bool backupUsable: false
+    // Only the desktop's process sends the notice (shell.qml turns this on): every Tacit program loads this file,
+    // and each sent its own, at each reload (Discord 2026-10-24: 17 of them). Said once per problem.
+    property bool reportsProblems: false
+    property string reportedProblem: ""
+    property string brokenText: ""
+    onReportsProblemsChanged: reportUnusableConfig()
     // Bumped whenever a key is renamed or moved. The adapter serialises only the properties it
     // declares, so without a stamp on the file there is no way to tell a value that was never
     // set from one this build no longer knows the name of - and the next settings change writes
@@ -109,10 +121,43 @@ Singleton {
         configFileView.writeAdapter();
     }
 
-    function reportUnusableConfig(reason) {
-        Quickshell.execDetached(["notify-send", "Shell configuration",
-            `${root.filePath} could not be read: ${reason}. The desktop is running on built-in defaults and will not write over the file.`,
-            "-a", "Shell"]);
+    function markUnusable(reason, text) {
+        root.unusableReason = reason;
+        root.brokenText = text;
+        backupCheck.running = false;
+        backupCheck.running = true;
+        root.reportUnusableConfig();
+    }
+
+    function markUsable() {
+        root.unusableReason = "";
+        root.reportedProblem = "";     // a later mistake is said again
+        root.brokenText = "";
+    }
+
+    // The notice offers the last good copy (backupConfig takes it from a clean read only, so a broken file never
+    // reaches it); Restore copies it back, which the file watch then reads.
+    function reportUnusableConfig() {
+        if (!root.reportsProblems || root.unusableReason === "") return;
+        const problem = root.unusableReason + "\n" + root.brokenText;
+        if (problem === root.reportedProblem) return;
+        root.reportedProblem = problem;
+        Quickshell.execDetached(["bash", "-c",
+            'body="$1 has a mistake in it ($3), so Tacit is using its defaults and keeps nothing you change until it is fixed."; a=(); '
+            + 'if jq empty "$2" 2>/dev/null; then body="$body The last good copy is next to it, config.json.bak."; a=(-A "restore=Restore the last good copy"); fi; '
+            + 'r=$(notify-send -a Tacit "${a[@]}" "Your settings couldn\'t be read" "$body"); '
+            + '[ "$r" = restore ] && jq empty "$2" 2>/dev/null && cp -f "$2" "$1"',
+            "config-notice", root.filePath, root.backupPath, root.unusableReason]);
+    }
+
+    function restoreBackup() {
+        Quickshell.execDetached(["bash", "-c", 'jq empty "$2" 2>/dev/null && cp -f "$2" "$1"', "config-restore", root.filePath, root.backupPath]);
+    }
+
+    Process {
+        id: backupCheck
+        command: ["jq", "empty", root.backupPath]
+        onExited: exitCode => root.backupUsable = exitCode === 0
     }
 
     // The FileNotFound path writes the defaults into a directory Directories creates with a
@@ -123,6 +168,7 @@ Singleton {
         onExited: {
             configFileView.writeAdapter();
             root.loadedCleanly = true;
+            root.markUsable();
             root.ready = true;
         }
     }
@@ -147,8 +193,9 @@ Singleton {
             }
             root.loadedCleanly = clean;
             root.ready = true;
-            if (!clean) root.reportUnusableConfig("it is not valid JSON");
+            if (!clean) root.markUnusable("it isn't valid JSON", configFileView.text());
             else {
+                root.markUsable();
                 root.backupConfig();
                 root.migrate();
             }
@@ -161,7 +208,7 @@ Singleton {
             // Every surface is gated on ready, so the desktop still comes up on the defaults
             // rather than black - it just says so and leaves the file alone.
             root.ready = true;
-            root.reportUnusableConfig(FileViewError.toString(error));
+            root.markUnusable(FileViewError.toString(error), "");
         }
 
         JsonAdapter {
