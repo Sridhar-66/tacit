@@ -653,7 +653,7 @@ ApplicationWindow {
     // Setup steps aside on the stick and says once how to come back: the launcher's Install Tacit (the ISO's
     // tacit-setup.desktop) opens it again
     function tryTacitFirst() {
-        Quickshell.execDetached(["notify-send", "-a", "Tacit", "Tacit is running from the USB stick",
+        Quickshell.execDetached(["notify-send", "-a", "Tacit", "Trying Tacit",
                                  "Nothing is installed. To install it, press Super and open Install Tacit."]);
         Qt.quit();
     }
