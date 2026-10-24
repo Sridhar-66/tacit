@@ -116,6 +116,9 @@ Item {
         StyledText {
             anchors { left: name.right; leftMargin: 8; right: trailing.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
             text: line.asked ? (line.answer.length ? `→ ${line.answer}` : "") : (line.item.summary ?? "")
+            // a command, never markup: as rich text a "<h1>" in a grep became a heading and the lines spilled over the rows around
+            textFormat: Text.PlainText
+            maximumLineCount: 1
             elide: Text.ElideRight
             font.family: line.headline.length && !line.asked ? Appearance.font.family.monospace : Appearance.font.family.main
             font.pixelSize: line.headline.length ? 14 : 15
@@ -218,6 +221,7 @@ Item {
                     id: resultText
                     width: parent.width
                     text: line.shown ? (line.item.result ?? "") : ""
+                    textFormat: Text.PlainText   // what the tool printed, as printed (a fetched page is not rendered)
                     wrapMode: Text.Wrap
                     font.family: Appearance.font.family.monospace
                     font.pixelSize: 14

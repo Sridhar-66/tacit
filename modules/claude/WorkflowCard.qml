@@ -86,6 +86,8 @@ Rectangle {
             StyledText {
                 anchors { left: label.right; leftMargin: 8; right: right.left; rightMargin: 10; baseline: label.baseline }
                 elide: Text.ElideRight
+                textFormat: Text.PlainText
+                maximumLineCount: 1
                 text: card.run?.name ?? card.item?.summary ?? ""
                 font.pixelSize: 14
                 color: Appearance.colors.colInkSecondary
