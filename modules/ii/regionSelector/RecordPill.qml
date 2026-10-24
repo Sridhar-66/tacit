@@ -26,14 +26,14 @@ Rectangle {
             text: pill.glyph
             fill: 1
             iconSize: 15
-            color: pill.strong ? Tacit.onAccent : Tacit.inkSec
+            color: pill.strong ? Tacit.inkOnAccent : Tacit.inkSec
         }
         StyledText {
             anchors.verticalCenter: parent.verticalCenter
             text: pill.label
             font.pixelSize: 14
             font.variableAxes: ({ "wght": pill.strong ? 600 : 450 })
-            color: pill.strong ? Tacit.onAccent : Tacit.inkSec
+            color: pill.strong ? Tacit.inkOnAccent : Tacit.inkSec
         }
     }
     MouseArea {

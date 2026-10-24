@@ -333,13 +333,13 @@ ApplicationWindow {
             }
             Body {    // the same words, dark where the sand is under them
                 x: cap.width / 2 - width / 2; anchors.verticalCenter: parent.verticalCenter
-                text: cap.word; font.pixelSize: cap.large ? 17 : 15; font.weight: Font.DemiBold; font.letterSpacing: 0.2; color: Tacit.onAccent
+                text: cap.word; font.pixelSize: cap.large ? 17 : 15; font.weight: Font.DemiBold; font.letterSpacing: 0.2; color: Tacit.inkOnAccent
             }
         }
         Row { anchors.centerIn: parent; spacing: 6
             MaterialSymbol { visible: cap.got; text: "check"; iconSize: cap.large ? 20 : 17; color: cap.onPicture ? "white" : Tacit.accent; anchors.verticalCenter: parent.verticalCenter }
             Body { id: ct; anchors.verticalCenter: parent.verticalCenter; text: cap.word; font.pixelSize: cap.large ? 17 : 15; font.weight: Font.DemiBold; font.letterSpacing: 0.2
-                color: cap.st === "getting" ? Tacit.accent : cap.solid && cap.st === "get" ? Tacit.onAccent : cap.onPicture ? "white" : cap.st === "get" ? Tacit.accent : cap.st === "unavailable" ? root.inkSec : root.inkMain } }
+                color: cap.st === "getting" ? Tacit.accent : cap.solid && cap.st === "get" ? Tacit.inkOnAccent : cap.onPicture ? "white" : cap.st === "get" ? Tacit.accent : cap.st === "unavailable" ? root.inkSec : root.inkMain } }
         MouseArea { id: ca; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true; enabled: cap.st === "get" || cap.st === "installed"
             cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: root.act(cap.a) }
     }
@@ -867,7 +867,7 @@ ApplicationWindow {
                     height: 48; radius: 24; width: goText.implicitWidth + 52
                     color: goArea.containsMouse ? ColorUtils.mix("#ffffff", Tacit.accent, 0.14) : Tacit.accent
                     scale: goArea.pressed ? 0.96 : 1; Behavior on scale { Spring {} }
-                    Body { id: goText; anchors.centerIn: parent; text: `Get ${sheet.last?.name ?? ""} and the updates`; font.pixelSize: 16; font.weight: Font.DemiBold; color: Tacit.onAccent }
+                    Body { id: goText; anchors.centerIn: parent; text: `Get ${sheet.last?.name ?? ""} and the updates`; font.pixelSize: 16; font.weight: Font.DemiBold; color: Tacit.inkOnAccent }
                     MouseArea { id: goArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                         onClicked: { const pk = root.askUpdate?.pkg; root.askUpdate = null; if (pk) root.getEverything(pk); } }
                 }
