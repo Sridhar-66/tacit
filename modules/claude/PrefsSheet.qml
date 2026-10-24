@@ -79,7 +79,8 @@ FocusScope {
         { id: "auto", label: "Auto", words: "in auto mode", about: "decides for itself what needs your OK" },
         { id: "manual", label: "Ask first", words: "asking first", about: "asks before every command and edit" },
         { id: "acceptEdits", label: "Edits ok", words: "with edits ok", about: "edits files freely, asks before commands" },
-        { id: "plan", label: "Plan", words: "planning only", about: "reads and plans, changes nothing" }
+        { id: "plan", label: "Plan", words: "planning only", about: "reads and plans, changes nothing" },
+        { id: "bypassPermissions", label: "Full access", words: "with full access", about: "runs every command and edit without asking; nothing is checked" }
     ]
     readonly property var effortWords: ({ low: "low", medium: "medium", high: "high", xhigh: "extra high", max: "max",
                                           ultra: "ultra", off: "off", minimal: "minimal" })
@@ -454,7 +455,7 @@ FocusScope {
             readonly property string scope: sheet.chScope
             readonly property var v: sheet.viewOf(scope)
             readonly property var allowed: sheet.accounts?.link?.agents?.[v.agent]?.caps?.modes ?? null
-            rows: sheet.modes.filter(m => !allowed || allowed.includes(m.id)).map(m => ({ label: m.label, after: m.about, on: m.id === v.mode, value: m.id }))
+            rows: sheet.modes.filter(m => allowed ? allowed.includes(m.id) : m.id !== "bypassPermissions").map(m => ({ label: m.label, after: m.about, on: m.id === v.mode, value: m.id }))
             Component.onCompleted: sheet.chooserItem = this
             onUsed: value => {
                 sheet.closeChooser();

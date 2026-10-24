@@ -59,7 +59,7 @@ Item {
     property string reportedEffort: "" // the level the running session reports
     property var recent: []            // the models lately picked for this agent, newest first
     property string keepFolder: ""     // the folder "Use for new sessions in" keeps the run for
-    property var modesAllowed: null    // the agent's modes (caps.modes); null offers all four
+    property var modesAllowed: null    // the agent's modes (caps.modes); null offers the four that need nothing from the host
     property color ground: ColorUtils.mix(Appearance.m3colors.m3surfaceContainerLow, Appearance.m3colors.m3primaryContainer, 0.8)
     readonly property bool hasCatalog: composer.features.includes("catalog")
     readonly property bool hasAccounts: !!composer.accounts?.available
@@ -97,7 +97,9 @@ Item {
         { id: "auto", label: "Auto", glyph: "auto_mode", about: "decides for itself what needs your OK" },
         { id: "manual", label: "Ask first", glyph: "back_hand", about: "asks before every command and edit" },
         { id: "acceptEdits", label: "Edits ok", glyph: "edit_note", about: "edits files freely, asks before commands" },
-        { id: "plan", label: "Plan", glyph: "map", about: "reads and plans, changes nothing" }
+        { id: "plan", label: "Plan", glyph: "map", about: "reads and plans, changes nothing" },
+        // Claude Code's bypassPermissions: offered only when the agent lists it (the host starts Claude able to take it)
+        { id: "bypassPermissions", label: "Full access", glyph: "lock-open", about: "runs every command and edit without asking; nothing is checked" }
     ]
     // a host that reads no model lists: Claude Code's own four names
     readonly property var oldModels: [
@@ -935,7 +937,7 @@ Item {
     Component {
         id: modeMenu
         ListMenu {
-            rows: (composer.modesAllowed ? composer.modes.filter(m => composer.modesAllowed.includes(m.id)) : composer.modes)
+            rows: (composer.modesAllowed ? composer.modes.filter(m => composer.modesAllowed.includes(m.id)) : composer.modes.filter(m => m.id !== "bypassPermissions"))
                 .map(m => ({ label: m.label, after: m.about, on: m.id === composer.mode, value: m.id }))
             keepLabel: composer.hasAccounts && composer.keepFolder.startsWith("/") ? (composer.keepFolder === Quickshell.env("HOME") ? "Home" : composer.keepFolder.split("/").pop()) : ""
             kept: composer.hasAccounts && composer.accounts.defaults?.folders?.[composer.keepFolder]?.mode === composer.mode

@@ -897,7 +897,7 @@ Item {
     // asking first); one the composer does not offer, or none, leaves the default
     function modeOf(mode) {
         const m = mode === "default" ? "manual" : mode;
-        return ["auto", "manual", "acceptEdits", "plan"].includes(m) ? m : "auto";
+        return ["auto", "manual", "acceptEdits", "plan", "bypassPermissions"].includes(m) ? m : "auto";
     }
     property var shownSession: null   // the session whose conversation is on screen (header follows it)
     function swapIn(items, start, total) {
