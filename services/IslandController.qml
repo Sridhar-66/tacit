@@ -1599,6 +1599,9 @@ Singleton {
         if (!n)
             return;
         Quickshell.execDetached(["sh", "-c", 'printf "%s\\n" "$2" > "$1"', "sh", n.fifo, which === "close" ? n.buttons[0] : n.buttons[1]]);
+        // Terminate is Hyprland's to carry out; an app that ignores it is killed 3 s later
+        if (which === "close" && n.pid)
+            Quickshell.execDetached(["sh", "-c", 'sleep 3; kill -0 "$1" 2>/dev/null && kill -KILL "$1"', "sh", String(n.pid)]);
         root.clearNotAnswering();
     }
     function notAnsweringDetails() {
@@ -1611,6 +1614,7 @@ Singleton {
         root.cancelState("notAnswering");
     }
     // The wrapper ends when the app answers again; Hyprland may SIGKILL it, so it cannot always say so.
+    // The app itself going away clears the card too.
     Timer {
         running: root.notAnswering !== null
         interval: 1000
@@ -1623,7 +1627,7 @@ Singleton {
     }
     Process {
         id: anrAlive
-        command: ["kill", "-0", String(root.notAnswering?.id ?? "-1")]
+        command: ["sh", "-c", 'kill -0 "$1" 2>/dev/null && { [ "$2" -gt 0 ] 2>/dev/null || exit 0; kill -0 "$2" 2>/dev/null; }', "sh", String(root.notAnswering?.id ?? "-1"), String(root.notAnswering?.pid ?? 0)]
         onExited: code => {
             if (code !== 0 && root.notAnswering !== null)
                 root.clearNotAnswering();
@@ -2290,6 +2294,11 @@ Singleton {
                 return "no";
             }
             return root.showNotAnswering(n) ? "shown" : "no";
+        }
+
+        // `island note <icon> "<text>"`: one line in the notch, for other programs
+        function note(icon: string, text: string): void {
+            root.request("copied", { "icon": icon, "text": text }, 65);
         }
 
         function notAnsweringGone(id: string): void {

@@ -15,13 +15,15 @@ Item {
     readonly property bool canOpen: item.open ?? false
     readonly property string quitText: item.quit ?? ""
     readonly property var verbs: item.verbs ?? []
+    readonly property bool verbsOnHover: item.verbsOnHover ?? false     // the row's own buttons come with Quit, on hover
     readonly property bool hot: item.hot ?? false
     readonly property bool dim: item.dim ?? false
     readonly property bool more: item.fold ?? false
     readonly property bool hovered: hov.hovered || (Ink.previewHover !== "" && Ink.previewHover === (item.key ?? ""))
     property bool confirming: false
     readonly property bool lit: (hovered && (canOpen || quitText !== "" || verbs.length > 0)) || activeFocus || confirming
-    readonly property bool showQuit: quitText !== "" && verbs.length === 0 && (hovered || activeFocus || confirming)
+    readonly property bool showQuit: quitText !== "" && (verbs.length === 0 || verbsOnHover) && (hovered || activeFocus || confirming)
+    readonly property bool showVerbs: !verbsOnHover || hovered || activeFocus || confirming
     readonly property color ink: lit ? Ink.main : more ? (hot ? Ink.main : Ink.sec) : dim ? Ink.faint : Ink.main
 
     height: 46
@@ -135,6 +137,9 @@ Item {
             Verb {
                 required property var modelData
                 anchors.verticalCenter: parent.verticalCenter
+                opacity: r.showVerbs ? 1 : 0
+                visible: opacity > 0
+                Behavior on opacity { Anim { type: Anim.FastEffects } }
                 text: modelData.text
                 primary: modelData.primary ?? false
                 later: modelData.later ?? false

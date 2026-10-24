@@ -379,6 +379,16 @@ ApplicationWindow {
                         onOpened: it => root.opened(it)
                         onAct: (it, what) => root.act(it, what)
                     }
+                    Gap { h: 24; visible: (nowPage.p?.background ?? []).length > 0 }
+                    Band {
+                        visible: (nowPage.p?.background ?? []).length > 0
+                        width: parent.width
+                        label: "In the background"
+                        wrap: true
+                        items: nowPage.p?.background ?? []
+                        onOpened: it => root.opened(it)
+                        onAct: (it, what) => root.act(it, what)
+                    }
                     Gap { h: 24 }
                     Band {
                         width: parent.width

@@ -28,6 +28,7 @@ ALIAS = {"claude_app": "praxis", "claude-app": "praxis", "org.chromium.Chromium"
 # Tacit's own apps run as `qs -p <file>.qml`; the shell itself is part of Tacit
 QML = {"claude.qml": "praxis", "code.qml": "graphis", "viewer.qml": "viewer",
        "tacit-settings.qml": "settings", "activity.qml": "activity", "welcome.qml": "welcome"}
+OWN = set(QML.values())
 AGENTS = {"claude": "claude", "codex": "codex", "opencode": "opencode", "pi": "pi"}
 # terminals: what is left running in one after its shell or agent is gone gets a row of its own
 TERMINALS = {"foot", "kitty", "alacritty", "wezterm", "ghostty", "konsole", "gnome-terminal", "xterm", "ptyxis"}
@@ -323,15 +324,16 @@ def hypr_clients():
         r = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=2)
         return [c for c in json.loads(r.stdout) if c.get("mapped", True)]
     except (OSError, subprocess.SubprocessError, ValueError):
-        return []
+        return None     # unknown, not "no windows": nothing may be called background then
 
 def sample():
     now = time.monotonic()
     ratio = zram_ratio()
     procs = scan()
     clients = hypr_clients()
+    win_known = clients is not None
     win_pids = {}
-    for c in clients:
+    for c in clients or []:
         win_pids.setdefault(c["pid"], []).append(c)
 
     # identity per process: its own, else the nearest ancestor's inside the same scope, else the scope's
@@ -473,6 +475,9 @@ def sample():
         g["cpu"] = round(g["cpu"], 4)
         if g["kind"] == "app" and g["mem"] < 1_000_000 and not g["windows"]:
             continue    # a launcher shell that only waits
+        # running with no window: Tacit's own parts and Activity are not "apps in the background"
+        if win_known and g["kind"] == "app" and g["pids"] and not g["windows"] and g["id"] not in OWN:
+            g["background"] = True
         g.pop("scopes", None)
         out.append(g)
     groups_now.clear()

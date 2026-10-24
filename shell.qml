@@ -14,11 +14,18 @@ import QtQuick.Window
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
+import Quickshell.Services.SystemTray
 
 ShellRoot {
     id: root
 
     ReloadPopup {}
+
+    // Tacit draws no tray, but Discord, Steam and the like register a tray icon only when some
+    // process owns org.kde.StatusNotifierWatcher. Quickshell creates it in the process that first
+    // uses SystemTray; a binding on the root is evaluated when the shell starts, so this
+    // process always does (Activity reads the items as a host).
+    readonly property var trayHost: SystemTray.items
 
     Process {
         id: autostartProc

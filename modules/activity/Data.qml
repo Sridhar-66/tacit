@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.SystemTray
 import qs.modules.common
 
 // What Activity shows. scripts/activity/sample.py reads the system every 2 s; this turns its numbers
@@ -127,9 +128,61 @@ Item {
                        hosted: hosted.length === 1 ? `a ${tool} session` : `${hosted.length} ${tool} sessions` };
             return;
         }
-        d.send({ op: "quit", key: item.key });
         d.quit = { key: item.key, name: name, mem: g.mem, at: Date.now(), phase: "closing", hadWindows: g.windows.length > 0,
-                   left: item.kind === "left" };
+                   left: item.kind === "left", background: item.background ?? false };
+        if (item.tray)
+            d.quitViaTray(item);
+        else
+            d.send({ op: "quit", key: item.key });
+    }
+    // An app in the background with a tray icon: its own Quit entry closes it the way the app means to;
+    // the menu loads over D-Bus, so wait for it, and without a Quit entry it is ended as any other app.
+    function quitViaTray(item) {
+        const o = trayQuitter.createObject(d, { item: item });
+        if (!o)
+            d.send({ op: "quit", key: item.key });
+    }
+    Component {
+        id: trayQuitter
+        Item {
+            id: o
+            property var item
+            property bool done: false
+            function settle(last) {
+                if (o.done)
+                    return;
+                const e = (opener.children?.values ?? []).find(x => !x.isSeparator && x.enabled && /^(quit|exit)\b/i.test((x.text ?? "").replace(/[_&]/g, "")));
+                if (!e && !last)
+                    return;
+                o.done = true;
+                if (e)
+                    e.triggered();
+                else
+                    d.send({ op: "quit", key: o.item.key });
+                o.destroy();
+            }
+            QsMenuOpener {
+                id: opener
+                menu: o.item.tray.menu
+                onChildrenChanged: o.settle(false)
+            }
+            Connections {
+                target: opener.children
+                function onValuesChanged() { o.settle(false); }
+            }
+            Timer {
+                running: true
+                interval: 1500
+                onTriggered: o.settle(true)
+            }
+        }
+    }
+    // the tray icon an app registered, matched by its id and title against the app's key, desktop id and
+    // name (case and "-", "_", "." ignored); an icon that matches nothing gets no row
+    function trayOf(g) {
+        const flat = s => (s ?? "").toLowerCase().replace(/[-_.]/g, "");
+        const names = [g.id, d.entryOf(g.id)?.id, d.appName(g.id)].map(flat).filter(x => x.length >= 3);
+        return SystemTray.items.values.find(t => [flat(t.id), flat(t.title)].some(a => a !== "" && names.some(n => a === n || a.includes(n)))) ?? null;
     }
     function forceQuit(key) {
         d.send({ op: "quit", key: key, force: true });
@@ -161,7 +214,7 @@ Item {
             d.quit = Object.assign({}, q, { phase: "asking" });
         else if (q.phase === "asking" && g.windows.length === 0)
             d.quit = Object.assign({}, q, { phase: "closing" });
-        else if (q.phase === "closing" && g.windows.length === 0 && t > 6) {
+        else if (q.phase === "closing" && g.windows.length === 0 && t > 6 && !q.background) {
             d.quit = Object.assign({}, q, { phase: "stuck" });
             d.stuck(q.key);
         }
@@ -186,6 +239,10 @@ Item {
                 d.startQuit(item, false);
         } else if (what === "quitAnyway") {
             d.startQuit(d.quit.item, true);
+        } else if (what === "forceQuit") {
+            d.forceQuit(item.key);
+        } else if (what === "openTray") {
+            item.tray?.activate();
         } else if (what === "keep") {
             d.keepRunning();
         } else if (what === "focus") {
@@ -280,7 +337,8 @@ Item {
 
     function itemOf(g) {
         return { key: g.key, kind: "app", id: g.id, n: d.appName(g.id), icon: d.appIcon(g.id), sym: d.syms[g.id] ?? "apps",
-                 mem: g.mem, cpu: g.cpu, windows: g.windows, parts: g.parts, busyFor: g.busyFor, pids: g.pids, open: true };
+                 mem: g.mem, cpu: g.cpu, windows: g.windows, parts: g.parts, busyFor: g.busyFor, pids: g.pids, open: true,
+                 background: g.background ?? false };
     }
     function apps() {
         const groups = d.snap?.groups ?? [];
@@ -339,7 +397,7 @@ Item {
         const agents = d.agents();
         const tacitG = s.groups.find(g => g.kind === "tacit");
         const busy = s.cpu.busy ?? 0;
-        const page = { mode: "rest", alarm: false, headline: "", cause: "", rest: "", gauge: null, verbs: [], apps: [], agents: [],
+        const page = { mode: "rest", alarm: false, headline: "", cause: "", rest: "", gauge: null, verbs: [], apps: [], background: [], agents: [],
                        tacit: [], foldHot: false, cpuView: false, canSwitch: false };
         // the sentence right above says what the bar measures: no label beside it
         const gauge = { value: used / total, word: "", warn: d.memAlarm };
@@ -441,7 +499,18 @@ Item {
             fade: q !== null && q.key === i.key && (q.phase === "closing" || q.phase === "asking") ? 0.35 : 1,
             quit: i.kind === "agents" ? i.quit : i.kind === "left" ? "Stop them" : `Quit ${i.n}`
         });
-        page.apps = apps.sort((a, b) => val(b) - val(a)).map(dress);
+        // apps with no window are listed once, in their own section (they still count above)
+        const ranked = apps.sort((a, b) => val(b) - val(a)).map(dress);
+        page.apps = ranked.filter(i => !i.background);
+        page.background = ranked.filter(i => i.background).map(i => {
+            const tray = d.trayOf(d.group(i.key));
+            // Quit (or, for a Quit that is not taking effect, Quit anyway) as on any other row; Open when there is a tray icon
+            const force = q !== null && q.key === i.key && q.background && q.phase === "closing" && Date.now() - q.at > 5000;
+            return Object.assign({}, i, { detail: "no window open", tray: tray, fade: force ? 1 : i.fade,
+                quit: force ? "" : i.quit,
+                verbs: force ? [{ text: "Quit anyway", act: "forceQuit" }] : tray ? [{ text: "Open", act: "openTray" }] : [],
+                verbsOnHover: !force });
+        });
         page.agents = agents.sort((a, b) => val(b) - val(a)).map(dress);
         page.tacit = tacitG ? [{ key: "tacit", kind: "tacit", n: "Tacit itself", detail: "the desktop, sound, networking", sym: "deployed_code",
                                  c1: page.cpuView ? d.pct(tacitG.cpu) : d.gb(tacitG.mem), dim: page.alarm, quit: "", open: true }] : [];
