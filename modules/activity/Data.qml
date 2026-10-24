@@ -177,12 +177,9 @@ Item {
             }
         }
     }
-    // the tray icon an app registered, matched by its id and title against the app's key, desktop id and
-    // name (case and "-", "_", "." ignored); an icon that matches nothing gets no row
+    // the tray icon the app's own processes show (sample.py asks D-Bus which process owns each icon)
     function trayOf(g) {
-        const flat = s => (s ?? "").toLowerCase().replace(/[-_.]/g, "");
-        const names = [g.id, d.entryOf(g.id)?.id, d.appName(g.id)].map(flat).filter(x => x.length >= 3);
-        return SystemTray.items.values.find(t => [flat(t.id), flat(t.title)].some(a => a !== "" && names.some(n => a === n || a.includes(n)))) ?? null;
+        return g?.tray ? (SystemTray.items.values.find(t => t.id === g.tray) ?? null) : null;
     }
     function forceQuit(key) {
         d.send({ op: "quit", key: key, force: true });

@@ -326,12 +326,42 @@ def hypr_clients():
     except (OSError, subprocess.SubprocessError, ValueError):
         return None     # unknown, not "no windows": nothing may be called background then
 
+# Tray icons and the processes that show them: an icon's own id often names no app (Electron's is chrome_status_icon_1),
+# so Activity finds an app's icon by process. D-Bus says which process owns each icon registered with the shell's
+# watcher; a service already asked keeps its answer while it stays registered.
+tray_seen = {}   # service -> (pid, icon id)
+def tray_owners():
+    def bus(*args):
+        r = subprocess.run(["busctl", "--user", "-j", *args], capture_output=True, text=True, timeout=2)
+        return json.loads(r.stdout)["data"]
+    try:
+        items = bus("get-property", "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher",
+                    "org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems")
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return {}
+    out = {}
+    for it in items:
+        svc, _, path = it.partition("/")
+        if svc not in tray_seen:
+            try:
+                pid = bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                          "GetConnectionUnixProcessID", "s", svc)[0]
+                tid = bus("get-property", svc, "/" + (path or "StatusNotifierItem"), "org.kde.StatusNotifierItem", "Id")
+            except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError):
+                continue
+            tray_seen[svc] = (pid, tid)
+        out[svc] = tray_seen[svc]
+    for svc in [k for k in tray_seen if k not in out]:
+        del tray_seen[svc]
+    return {pid: tid for pid, tid in out.values()}
+
 def sample():
     now = time.monotonic()
     ratio = zram_ratio()
     procs = scan()
     clients = hypr_clients()
     win_known = clients is not None
+    trays = tray_owners()
     win_pids = {}
     for c in clients or []:
         win_pids.setdefault(c["pid"], []).append(c)
@@ -478,6 +508,10 @@ def sample():
         # running with no window: Tacit's own parts and Activity are not "apps in the background"
         if win_known and g["kind"] == "app" and g["pids"] and not g["windows"] and g["id"] not in OWN:
             g["background"] = True
+            # its tray icon, if one of its processes shows one
+            tid = next((trays[pid] for pid in g["pids"] if pid in trays), None)
+            if tid is not None:
+                g["tray"] = tid
         g.pop("scopes", None)
         out.append(g)
     groups_now.clear()
