@@ -19,6 +19,43 @@ It began as a fork of [illogical-impulse](https://github.com/end-4/dots-hyprland
 
 ---
 
+## Try a change on Tacit
+
+All you need is a computer, or a virtual machine, running Tacit. It already has everything else this repo uses.
+
+**1. Get your copy.** Fork this repo on GitHub, then:
+
+```bash
+git clone https://github.com/YOUR-NAME/tacit ~/src/tacit
+```
+
+**2. Point Tacit at it.** Add this line to `~/.config/hypr/custom/env.lua`:
+
+```lua
+hl.env("TACIT_SHELL", os.getenv("HOME") .. "/src/tacit")
+```
+
+**3. Restart your computer.** The notch, the palette, Settings and Tacit's own apps now run from `~/src/tacit`.
+
+**4. Change something and save.** The desktop reloads straight away; Settings and the other apps show the change the
+next time you open them. If nothing changes, press **Ctrl+Super+R** to restart the desktop. If it still doesn't change,
+the file has a mistake and Tacit keeps running the last version that worked. This shows the mistake:
+
+```bash
+qs log -p ~/src/tacit
+```
+
+**5. Send it.** Commit with `git commit -s` (see CONTRIBUTING.md), push to your fork and open a pull request.
+
+**To go back** to the installed Tacit, delete the line from step 2 and restart your computer.
+
+Your copy covers everything in `modules/`, `services/`, `scripts/` and `assets/`, and the app files at the top
+(`tacit-settings.qml`, `viewer.qml` and the rest). The Hyprland setup (`session/`), the small commands in `bin/` and the
+compiled parts in `native/` come from Tacit's installed packages instead, so a change there only takes effect once the
+packages are rebuilt with it ([tacit-build](https://github.com/ciscobugger/tacit-build)). Say so in your pull request.
+
+---
+
 ## Requirements
 
 ### Compositor configuration
@@ -109,7 +146,9 @@ Some features call helpers that live in `~/.local/bin` and are installed separat
 
 ---
 
-## Installation
+## Running it without Tacit
+
+On your own Arch and Hyprland setup, with the requirements above:
 
 ```bash
 cd ~/.config/quickshell/
