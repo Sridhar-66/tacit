@@ -22,7 +22,9 @@ hl.on("hyprland.start", function ()
     -- lock request to the lock's first frame, and with xray it shows what is underneath instead (the boot still, the same
     -- pixels). bootlock.qml switches it off once its sky is under way, and this line again when the boot lock ends.
     -- Not on Tacit's live system (/run/archiso): its user has no password and goes straight to Setup.
-    hl.exec_cmd("bash -c '[ -d /run/archiso ] && exit 0; rm -f $XDG_RUNTIME_DIR/martida-lock-ready; hyprctl eval \"hl.config({ misc = { session_lock_xray = true } })\" >/dev/null 2>&1; QS_BOOTLOCK=1 qs -p $TACIT_SHELL/bootlock.qml; hyprctl eval \"hl.config({ misc = { session_lock_xray = false } })\" >/dev/null 2>&1; [ -e $XDG_RUNTIME_DIR/martida-lock-ready ] || { hyprlock --immediate-render --no-fade-in & sleep 0.5; touch $XDG_RUNTIME_DIR/martida-lock-ready; wait; }'")
+    -- Not after a sign-in at the login screen either (logind's Service "sddm", not "sddm-autologin"): the password was
+    -- just typed there, and the boot lock asked for it a second time; the ready marker says someone has signed in.
+    hl.exec_cmd("bash -c '[ -d /run/archiso ] && exit 0; [ \"$(loginctl show-session \"$XDG_SESSION_ID\" -p Service --value 2>/dev/null)\" = sddm ] && { touch $XDG_RUNTIME_DIR/martida-lock-ready; exit 0; }; rm -f $XDG_RUNTIME_DIR/martida-lock-ready; hyprctl eval \"hl.config({ misc = { session_lock_xray = true } })\" >/dev/null 2>&1; QS_BOOTLOCK=1 qs -p $TACIT_SHELL/bootlock.qml; hyprctl eval \"hl.config({ misc = { session_lock_xray = false } })\" >/dev/null 2>&1; [ -e $XDG_RUNTIME_DIR/martida-lock-ready ] || { hyprlock --immediate-render --no-fade-in & sleep 0.5; touch $XDG_RUNTIME_DIR/martida-lock-ready; wait; }'")
     hl.exec_cmd("$TACIT_HYPR/hyprland/scripts/start_geoclue_agent.sh")
     -- Unsupervised is the fallback, not the plan: say so instead of leaving ~/.cache/qs-startup.log
     -- as the only trace that the crash-loop backoff and its give-up note are absent.
