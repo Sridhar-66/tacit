@@ -119,7 +119,29 @@ MouseArea {
             x: index * root.gridSize
             width: 1
             height: root.height
-            color: Appearance.colors.colLayer0Border
+            gradient: Gradient {
+                orientation: Gradient.Vertical
+                GradientStop {
+                    position: 0
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.04)
+                }
+                GradientStop {
+                    position: 0.25
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.18)
+                }
+                GradientStop {
+                    position: 0.5
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.35)
+                }
+                GradientStop {
+                    position: 0.75
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.18)
+                }
+                GradientStop {
+                    position: 1
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.04)
+                }
+            }
         }
     }
 
@@ -130,7 +152,29 @@ MouseArea {
             y: index * root.gridSize
             width: root.width
             height: 1
-            color: Appearance.colors.colLayer0Border
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop {
+                    position: 0
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.04)
+                }
+                GradientStop {
+                    position: 0.25
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.18)
+                }
+                GradientStop {
+                    position: 0.5
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.35)
+                }
+                GradientStop {
+                    position: 0.75
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.18)
+                }
+                GradientStop {
+                    position: 1
+                    color: Qt.rgba(Appearance.colors.colLayer0Border.r, Appearance.colors.colLayer0Border.g, Appearance.colors.colLayer0Border.b, 0.04)
+                }
+            }
         }
     }
 
