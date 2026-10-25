@@ -36,6 +36,7 @@ Singleton {
             if (!connected)
                 return;
             root.attach();
+            titlesLater.restart();
             // Questions typed while the host was working sit in the queue, and only a turn ending
             // drains it: when the host itself went away nothing was left to end a turn, so they
             // stayed there for the rest of the session.
@@ -46,6 +47,29 @@ Singleton {
     readonly property bool connected: host.connected
     readonly property var live: host.live
     function request(obj, cb) { host.request(obj, cb); }
+
+    // The conversations' own titles (Claude's, or the name given one), from the host's history. A session's live
+    // `prompt` is only the first message sent through the host since it last attached: on a resumed session that is
+    // whatever was typed first after resuming ("shell crashed"), which the notch then showed as its name for good.
+    property var historyTitles: ({})
+    Timer {
+        id: titlesLater
+        interval: 4000   // history changes with every message of a running session: read it after a quiet moment
+        onTriggered: host.request({ op: "history" }, r => {
+            if (r.ev !== "history" || !Array.isArray(r.sessions)) return;
+            const t = {};
+            for (const e of r.sessions) {
+                const name = (e.title ?? "") + "";
+                if (name.length) t[e.id] = name;
+                else if ((e.prompt ?? "").length) t[e.id] = e.prompt + "";
+            }
+            root.historyTitles = t;
+        })
+    }
+    Connections {
+        target: host
+        function onHistoryChanged() { titlesLater.restart(); }
+    }
     function startHost() { Quickshell.execDetached(["systemctl", "--user", "start", "agent-host.service"]); }
 
     // ── the notch conversation ──────────────────────────────────────────────
@@ -589,7 +613,7 @@ Singleton {
             if (!open[r]) delete root.waitingSince[r];
         root.lastStates = next;
     }
-    function titleOf(id) { return root.shorten(root.strip(host.live[id]?.prompt ?? "")) || "Claude"; }
+    function titleOf(id) { return root.shorten(root.strip(root.historyTitles[id] ?? host.live[id]?.prompt ?? "")) || "Claude"; }
     function startActivity(id) {
         if (Notifications.silent) return;
         root.activityId = id;

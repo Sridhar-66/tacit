@@ -10,12 +10,29 @@ import Quickshell.Io
  * A nice wrapper for date and time strings.
  */
 Singleton {
-    property var clock: SystemClock {
+    // The time, ticking on the minute (on the second with seconds shown or the screen locked). Not Quickshell's
+    // SystemClock: it schedules its next tick from local clock time, and in the hour that repeats when the clocks go
+    // back that lands in the past, so it fired every millisecond for the whole hour (25 October 2026: 340 MB of log,
+    // an hour of CPU). This waits on elapsed time, which never runs backwards.
+    property QtObject clock: QtObject {
         id: clock
-        precision: {
-            if (Config.options.time.secondPrecision || GlobalStates.screenLocked)
-            return SystemClock.Seconds;
-            return SystemClock.Minutes;
+        property var date: new Date()
+        readonly property int hours: date.getHours()
+        readonly property int minutes: date.getMinutes()
+        readonly property int seconds: date.getSeconds()
+        readonly property int unit: (Config.options.time.secondPrecision || GlobalStates.screenLocked) ? 1000 : 60000
+        onUnitChanged: { clock.date = new Date(); tick.restart(); }
+    }
+    Timer {
+        id: tick
+        // to the next whole second or minute, a few ms past it so the new value is already there
+        interval: clock.unit - (Date.now() % clock.unit) + 5
+        running: true
+        repeat: false
+        onTriggered: {
+            clock.date = new Date();
+            tick.interval = clock.unit - (Date.now() % clock.unit) + 5;
+            tick.restart();
         }
     }
 
