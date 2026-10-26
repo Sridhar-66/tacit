@@ -12,7 +12,11 @@ MouseArea {
     property bool draggable: true
     property int gridSize: 12
     property bool snapEnabled: true
+    property real snapAssistSpeed: 0.35
     readonly property bool dragging: drag.active
+    property point allowedDragPosition: Qt.point(0, 0)
+    property point lastPointerPosition: Qt.point(0, 0)
+    property double lastPointerTime: 0
 
     property bool selected: false
     property bool groupDragActive: false
@@ -51,15 +55,42 @@ MouseArea {
         return null
     }
 
-    function updateCenterHighlight() {
+    function updateDragFeedback() {
         var canvas = findCanvas(root.parent)
         if (!canvas) return
-        var widgetCenterX = dragProxy.x + root.width / 2
-        var widgetCenterY = dragProxy.y + root.height / 2
-        var threshold = root.gridSize
-        var nearX = Math.abs(widgetCenterX - canvas.width / 2) < threshold
-        var nearY = Math.abs(widgetCenterY - canvas.height / 2) < threshold
-        canvas.setCenterActive(nearX, nearY)
+        var topLeft = root.mapToItem(canvas, 0, 0)
+        var bottomRight = root.mapToItem(canvas, root.width, root.height)
+        canvas.setDragRect(Qt.rect(topLeft.x, topLeft.y,
+            bottomRight.x - topLeft.x, bottomRight.y - topLeft.y))
+    }
+
+    function updateDragPosition() {
+        if (!root.dragging) return
+        const now = Date.now()
+        const elapsed = now - root.lastPointerTime
+        const pointerX = dragProxy.x
+        const pointerY = dragProxy.y
+        const dx = pointerX - root.lastPointerPosition.x
+        const dy = pointerY - root.lastPointerPosition.y
+        const speed = elapsed > 0 ? Math.sqrt(dx * dx + dy * dy) / elapsed : Infinity
+        root.lastPointerPosition = Qt.point(pointerX, pointerY)
+        root.lastPointerTime = now
+
+        let targetX = pointerX
+        let targetY = pointerY
+        if (root.snapEnabled && speed <= root.snapAssistSpeed) {
+            targetX = root.snap(targetX)
+            targetY = root.snap(targetY)
+        }
+
+        const canvas = findCanvas(root.parent)
+        if (canvas) {
+            const resolved = canvas.resolveDragPosition(root, targetX, targetY)
+            root.allowedDragPosition = resolved
+        } else {
+            root.allowedDragPosition = Qt.point(targetX, targetY)
+        }
+        root.updateDragFeedback()
     }
 
     function commitPosition() {}
@@ -80,21 +111,24 @@ MouseArea {
         x: root.x
         y: root.y
 
-        onXChanged: if (root.dragging) root.updateCenterHighlight()
-        onYChanged: if (root.dragging) root.updateCenterHighlight()
+    }
+
+    FrameAnimation {
+        running: root.dragging
+        onTriggered: root.updateDragPosition()
     }
 
     Binding {
         target: root
         property: "x"
-        value: root.snapEnabled ? root.snap(dragProxy.x) : dragProxy.x
+        value: root.allowedDragPosition.x
         when: root.dragging
         restoreMode: Binding.RestoreNone
     }
     Binding {
         target: root
         property: "y"
-        value: root.snapEnabled ? root.snap(dragProxy.y) : dragProxy.y
+        value: root.allowedDragPosition.y
         when: root.dragging
         restoreMode: Binding.RestoreNone
     }
@@ -116,25 +150,27 @@ MouseArea {
 
         if (dragging) {
             if (canvas) canvas.beginGroupDrag(root)
+            root.allowedDragPosition = Qt.point(root.x, root.y)
+            root.lastPointerPosition = Qt.point(dragProxy.x, dragProxy.y)
+            root.lastPointerTime = Date.now()
+            root.updateDragFeedback()
         } else {
-            if (canvas) canvas.endGroupDrag()
-
-            var left = root.x
-            var right = root.x + root.width
-            var top = root.y
-            var bottom = root.y + root.height
-            var verticalLines = [left, right]
-            var horizontalLines = [top, bottom]
-
-            var widgetCenterX = root.x + root.width / 2
-            var widgetCenterY = root.y + root.height / 2
-            if (canvas && Math.abs(widgetCenterX - canvas.width / 2) < root.gridSize / 2)
-                verticalLines.push(canvas.width / 2)
-            if (canvas && Math.abs(widgetCenterY - canvas.height / 2) < root.gridSize / 2)
-                horizontalLines.push(canvas.height / 2)
-
-            if (canvas && Config.options.background.showSnapLines)
-                canvas.flashLines(verticalLines, horizontalLines)
+            var snappedX = root.snapEnabled ? root.snap(root.x) : root.x
+            var snappedY = root.snapEnabled ? root.snap(root.y) : root.y
+            if (canvas) {
+                var resolved = canvas.resolveDragPosition(root, snappedX, snappedY)
+                snappedX = resolved.x
+                snappedY = resolved.y
+            }
+            var snapDeltaX = snappedX - root.x
+            var snapDeltaY = snappedY - root.y
+            var settlingGroup = canvas && canvas.groupDragMemberStarts.length > 0
+            if (settlingGroup) root.groupDragActive = true
+            root.x = snappedX
+            root.y = snappedY
+            if (canvas) canvas.endGroupDrag(snapDeltaX, snapDeltaY)
+            if (settlingGroup) root.groupDragActive = false
+            root.commitPosition()
         }
 
         dragProxy.x = root.x
@@ -154,11 +190,11 @@ MouseArea {
     Behavior on x {
         id: xBehavior
         enabled: !root.dragging && !root.groupDragActive
-        animation: Appearance.animation.elementMove.numberAnimation.createObject(this)
+        animation: Appearance.animation.elementMoveSmall.numberAnimation.createObject(this)
     }
     Behavior on y {
         id: yBehavior
         enabled: !root.dragging && !root.groupDragActive
-        animation: Appearance.animation.elementMove.numberAnimation.createObject(this)
+        animation: Appearance.animation.elementMoveSmall.numberAnimation.createObject(this)
     }
 }

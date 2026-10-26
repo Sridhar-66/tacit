@@ -1076,8 +1076,8 @@ ContentPage {
                     }
                     ConfigSwitch {
                         Layout.fillWidth: true
-                        buttonIcon: "align_horizontal_center"
-                        text: Translation.tr("Show snap lines when dropping")
+                        buttonIcon: "center_focus_strong"
+                        text: Translation.tr("Emphasize dots near widget")
                         checked: Config.options.background.showSnapLines
                         onSwitched: (value) => {
                             Config.options.background.showSnapLines = value;

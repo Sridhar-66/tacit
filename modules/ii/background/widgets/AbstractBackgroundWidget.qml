@@ -49,8 +49,6 @@ AbstractWidget {
         root.restoreXYBinding();
     }
 
-    onReleased: root.commitPosition()
-
     property bool needsColText: false
     property color dominantColor: Appearance.colors.colPrimary
     property bool dominantColorIsDark: dominantColor.hslLightness < 0.5
